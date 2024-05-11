@@ -202,8 +202,10 @@ Outreach P1,260,1,1,Andrea Henderson,"Louise Campbell, I agree with you in think
 Outreach P1,260,1,1,Louise Campbell,"Anna Jones, this is what I was thinking. If you really loved him you wouldn’t allow that. Alexandra, I was leaning toward the tiger at first because of the descriptions you gave. The apple doesn’t fall far from the tree and all that. 🙂",2021-02-22 06:20:44,False,10,1.1,Seminar
 Outreach P1,260,1,1,Andrea Henderson,"Yeah, I was going back and forth a lot on what I think happened. So I can definitely see your reasoning for her picking the lady.",2021-02-23 07:32:16,False,10,1.1,Seminar
 Outreach P1,260,1,1,Anna Jones,"So, where have we landed: Lady or tiger? Trial or coverup? I think we just have to write something in the space below.",2021-02-23 17:43:29,False,10,1.1,Other
-Outreach P1,260,1,1,Andrea Henderson,Should we go with the choices that have a majority? So the lady behind the door and the king covering up for his daughter?,2021-02-24 11:05:19,False,10,1.1,Deliberation
-Outreach P1,260,1,1,Andrea Henderson,"Is the response we write in the field below supposed to be in the same style of the story, like we're completing it? Or are we just answering the questions?",2021-02-25 17:41:08,False,10,1.1,Deliberation
+Outreach P1,260,1,1,Andrea Henderson,Should we go with the choices that have a majority?,2021-02-24 11:05:19,False,10,1.1,Deliberation
+Outreach P1,260,1,1,Andrea Henderson,So the lady behind the door and the king covering up for his daughter?,2021-02-24 11:05:19,False,10,1.1,Deliberation
+Outreach P1,260,1,1,Andrea Henderson,"Is the response we write in the field below supposed to be in the same style of the story, like we're completing it?",2021-02-25 17:41:08,False,10,1.1,Deliberation
+Outreach P1,260,1,1,Andrea Henderson,Or are we just answering the questions?,2021-02-25 17:41:08,False,10,1.1,Deliberation
 Outreach P1,260,1,1,Anna Jones,I'm good with writing the majority choices.,2021-02-25 17:46:45,False,10,1.1,Deliberation
 Outreach P1,260,1,1,Anna Jones,"Unfortunately I can't click in the box below at all, so it's anyone's guess what style our response is supposed to be in. I would imagine answering the questions simply would be fine.",2021-02-25 17:47:32,False,10,1.1,UX
 Outreach P1,260,1,1,Anna Jones,"Oh good! I can, in fact, click in the box.",2021-02-25 17:47:51,False,10,1.1,UX
@@ -225,8 +227,8 @@ Outreach P1,260,3,1,Karen Richardson,"Interesting Jennifer Gonzalez that I initi
 Outreach P1,260,3,1,Karen Richardson,"I believe the lady was behind the door as the description of the princess was ""semi-barbaric."" She could probably have the new couple banished from the kingdom so she would not have to see them. I believe it was the tiger because the princess could not bear for anyone else to have him.",2021-02-22 14:18:32,False,,1.3,Seminar
 Outreach P1,260,3,1,Jennifer Gonzalez,"Upon discovering his daughter has broken the law, the King responds out of love, because she is the apple of his eye, and he forgives her.",2021-02-22 18:22:10,False,10,1.3,Seminar
 Outreach P1,260,3,1,Earl Foster,"Karen Richardson,",2021-02-23 11:47:46,False,10,1.3,Seminar
-Outreach P1,260,3,1,Earl Foster,I agree that the princess could just banish the new couple away too,2021-02-23 11:48:18,False,10,1.3,Seminar
-Outreach P1,260,3,1,Earl Foster, Do we have to agree on a single ending?,2021-02-23 11:48:18,False,10,1.3,Deliberation
+Outreach P1,260,3,1,Earl Foster,I agree that the princess could just banish the new couple away too.,2021-02-23 11:48:18,False,10,1.3,Seminar
+Outreach P1,260,3,1,Earl Foster,Do we have to agree on a single ending?,2021-02-23 11:48:18,False,10,1.3,Deliberation
 Outreach P1,260,3,1,Karen Richardson,I don't think we have to agree on a single ending as both are viable. I still will go with the Lady as being behind the curtain. The King will be upset with this but will forgive his daughter. He may do something else to the boyfriend later.,2021-02-23 17:33:42,False,10,1.3,Seminar
 Outreach P1,260,3,1,Earl Foster,"So the King would come back at the boyfriend later due to him ""cheating"" the trial? I can see that.",2021-02-23 17:40:56,False,10,1.3,Seminar
 Outreach P1,260,3,1,Jennifer Gonzalez,I agree he will forgive his daughter because he loves her so.,2021-02-23 21:09:22,False,10,1.3,Seminar
@@ -245,8 +247,8 @@ PIM P1,260,1,1,Lisa Morgan,Which questions? like the prompt?,2021-02-17 19:53:27
 PIM P1,260,1,1,Joe Ross,Live Without Him is probably the most important question,2021-02-17 19:53:50,False,8,2.1,Deliberation
 PIM P1,260,1,1,Joe Ross,But it asked for 4 so i amswered with 4,2021-02-17 19:54:16,False,8,2.1,Deliberation
 PIM P1,260,1,1,Carol Simmons,We need total four answers to the question,2021-02-17 19:54:37,False,8,2.1,Deliberation
-PIM P1,260,1,1,Joe Ross,"Oh I see, there are two questions here",2021-02-17 19:55:04,False,8,2.1,Deliberation
-PIM P1,260,1,1,Joe Ross, I feel that the princess would have led him to the tiger,2021-02-17 19:55:04,False,8,2.1,Seminar
+PIM P1,260,1,1,Joe Ross,"Oh I see, there are two questions here.",2021-02-17 19:55:04,False,8,2.1,Deliberation
+PIM P1,260,1,1,Joe Ross,I feel that the princess would have led him to the tiger,2021-02-17 19:55:04,False,8,2.1,Seminar
 PIM P1,260,1,1,Carol Simmons,ok,2021-02-17 19:55:18,False,8,2.1,Deliberation
 PIM P1,260,1,1,Lisa Morgan,I feel like it would be the opposite because she went to all the hassle to find out.,2021-02-17 19:55:43,False,10,2.1,Seminar
 PIM P1,260,1,1,Joe Ross,"At the top of the screen are two questions, I believe that is what the 1 & 2 are on the bottom portion",2021-02-17 19:55:48,False,8,2.1,Deliberation
@@ -313,8 +315,8 @@ PIM P1,260,2,1,Deborah Evans,"Yes, I see it. It looks great",2021-02-24 09:00:01
 PIM P1,260,2,1,Cheryl Diaz,"Oh, yay! Can you type a few words in there so I can see if they appear in real time? Then I think we can sign off.",2021-02-24 09:01:11,False,10,2.2,Procedure
 PIM P1,260,2,1,Cheryl Diaz,"Sorry, i see you comment now.",2021-02-24 09:01:36,False,10,2.2,Procedure
 PIM P1,260,2,1,Cheryl Diaz,"Thanks. I apologize for delaying you on completing this assignment, but I appreciate your taking the extra time for me. Good luck with the rest of the semester!",2021-02-24 09:02:52,False,10,2.2,Social
-PIM P1,260,2,1,Deborah Evans,Looks good,2021-02-24 09:03:00,False,10,2.2,Social
-PIM P1,260,2,1,Deborah Evans, I guess we can complete the post survey and submit our assignment,2021-02-24 09:03:00,False,10,2.2,Procedure
+PIM P1,260,2,1,Deborah Evans,Looks good!,2021-02-24 09:03:00,False,10,2.2,Social
+PIM P1,260,2,1,Deborah Evans,I guess we can complete the post survey and submit our assignment,2021-02-24 09:03:00,False,10,2.2,Procedure
 PIM P1,260,2,1,Deborah Evans,Good luck to you as well,2021-02-24 09:03:20,False,10,2.2,Social
 PIM P1,260,2,1,Cheryl Diaz,Yes. Thanks. Bye!,2021-02-24 09:03:25,False,10,2.2,Social
 PIM P1,260,3,1,Joyce Brown,I  think she sends him to the door with the tiger. When the king finds out that she knew he is so pleased by her barbarism that he does nothing but inside he has now decided that she is a worthy predecessor.,2021-02-17 09:41:48,False,10,2.3,Seminar
@@ -362,7 +364,8 @@ PIM P1,260,4,1,Linda Long,"lol no, it just seemed like what happened based on he
 PIM P1,260,4,1,Patricia Green,"Yes, she did seem very jealous. The story led me to believe she would rather nobody have him if she could not.",2021-02-23 20:15:34,False,9,2.4,Seminar
 PIM P1,260,4,1,Michelle Rivera,"from my thoughts I thought yes, he sets up 2 doors for her and lets the trial decide.",2021-02-23 20:15:34,False,10,2.4,Seminar
 PIM P1,260,4,1,Linda Long,"I think so. Even though the story said he loved her so much, I think his barbaric nature would take over his reasoning",2021-02-23 20:15:56,False,9,2.4,Seminar
-PIM P1,260,4,1,Patricia Green,"Ok, so what happens then? Do we choose which door she opens?",2021-02-23 20:16:27,False,9,2.4,Deliberation
+PIM P1,260,4,1,Patricia Green,"Ok, so what happens then?",2021-02-23 20:16:27,False,9,2.4,Deliberation
+PIM P1,260,4,1,Patricia Green,Do we choose which door she opens?,2021-02-23 20:16:27,False,9,2.4,Deliberation
 PIM P1,260,4,1,Linda Long,Are we all supposed to write our answers below?,2021-02-23 20:16:39,False,9,2.4,Deliberation
 PIM P1,260,4,1,Michelle Rivera,"I think it's barbaric nature but also slightly just (in a warped way), because as it mentions he treated women and men equally so would feel obliged to treat his daughter the same",2021-02-23 20:16:50,False,10,2.4,Seminar
 PIM P1,260,4,1,Patricia Green,"Yes, I think so. We were discussing if we write it like answers or finish the story? Thoughts?",2021-02-23 20:17:13,False,9,2.4,Deliberation
