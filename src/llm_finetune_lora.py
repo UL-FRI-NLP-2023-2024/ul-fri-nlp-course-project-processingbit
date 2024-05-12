@@ -5,16 +5,26 @@ import joblib
 import requests
 import torch
 import transformers
+import xml.etree.ElementTree as ET
+import re
+import pandas as pd
+from datasets import load_dataset
 
 #from IPython.display import print
 from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
 from langchain.text_splitter import RecursiveCharacterTextSplitter, HTMLHeaderTextSplitter, TokenTextSplitter
+from langchain.chains import create_history_aware_retriever
+from langchain.memory.buffer import ConversationBufferMemory
+from langchain.memory.buffer_window import ConversationBufferWindowMemory
 from langchain_community.document_loaders import BSHTMLLoader
 from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
 from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
 from langchain_community.vectorstores.faiss import FAISS
-
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate
+from langchain.chains import create_retrieval_chain
+from langchain_community.docstore.document import Document
 
 ############################################################
 #                   Load the LLM model                     #
@@ -79,7 +89,113 @@ embedding = HuggingFaceEmbeddings(
     model_kwargs={"device": "cuda"},
 )
 
+# Template
+PROMPT_TEMPLATE = """
+You are a helpful AI assistant.
+The chat below is between children about a story.
+I need you to categorize the new sentence based on the codebook enclosed by triple *.
+Answer with only one of the classes from the codebook under Term.
 
+***
+{codebook}
+***
+
+You can use the context of the story enclosed by triple backquotes if it is relevant.
+If you don't know the answer, just retun nan, don't try to make up an answer.
+
+```
+{context}
+```
+
+The history of the chat is as follows enclosed by [ ].
+[{history}]
+
+### Sentence:
+{sentence}
+
+### Answer:
+"""
+
+prompt_template = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+
+# Retrive the dataset to test and train the model
+dataset = load_dataset("csv", data_files="./cleaned_data/discussion_data.csv", split="train")
+train_dataset, test_dataset = dataset.train_test_split(test_size=0.2, seed=42)
+
+# Retrieve story from chat history
+xml_file = './data/LadyOrThetigerIMapBook.xml'
+tree = ET.parse(xml_file)
+root = tree.getroot()
+
+story = ''
+for page in root.findall('.//page'):
+    page_type_id = page.attrib['type_id']
+    state_text = page.find('state/text').text.strip()
+    story += state_text + '\n'
+
+story = story.replace('<p>', '')
+story = story.replace('</p>', '\n')
+story = re.sub(r'\n+', '\n', story)
+story = story.strip()
+story_doc = [Document(page_content=story)]
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=20)
+story_splitted = text_splitter.split_documents(story_doc)
+vectorstore = FAISS.from_documents(story_splitted, embedding)
+retreiver = vectorstore.as_retriever(
+    search_type="similarity",
+    k=3,
+)
+
+STORY_RETRIEVER_TEMPLATE = """
+You are an helpful AI assistant that knows everything about the story in the documents.
+You need to retrieve the most relevant document based on the following chat:
+
+CHAT_HISTORY:
+{chat_history}
+
+CURRENT_SENTENCE:
+{input}
+"""
+
+story_retriever_prompt = PromptTemplate.from_template(STORY_RETRIEVER_TEMPLATE)
+
+retriever_chain = create_history_aware_retriever(
+    llm=llm,
+    retriever=retreiver,
+    prompt = story_retriever_prompt,
+)
+
+document_chain = create_stuff_documents_chain(llm, prompt_template)
+
+# Retrieve codebook
+class_to_predict = 'Discussion'
+codebook_file = './data/codebook.xlsx'
+codebook = pd.read_excel(codebook_file)
+codebook[['Class', 'Term']] = codebook['Term'].str.split(':', expand=True)
+codebook = codebook[codebook['Class'] == class_to_predict]
+codebook.drop(columns=['Class'], inplace=True)
+codebook = codebook.to_string(index=False)
+
+# Construct memory
+memory = ConversationBufferWindowMemory(
+        memory_key="chat_history", 
+        return_messages=True, 
+        output_key="answer", 
+        llm=llm,
+        k=3,
+    )
+
+def categorize(sentence) -> str:
+    history = memory.load_memory_variables({})
+
+    docs = retriever_chain.invoke({"input": sentence, "chat_history": history})
+
+    response = document_chain.invoke({"sentence": sentence, "codebook": codebook, "context": docs[0]["text"], "history": history})
+    answer = response["answer"].split("### Answer:")[-1].strip()
+    return answer
+
+print(categorize("I think the princess will choose the lady"))
 
 
 

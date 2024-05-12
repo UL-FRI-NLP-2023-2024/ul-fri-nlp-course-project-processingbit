@@ -10,4 +10,4 @@
 #SBATCH --output=logs/RAG-job_%j.log        # Standard output log
 #SBATCH --error=logs/RAG-job_%j.err         # Standard error log
 
-singularity exec --nv ./containers/container_llm.sif python3 retrieval_augmented_generation.py
+singularity exec --nv ./containers/container_llm.sif python3 llm_finetune_lora.py
