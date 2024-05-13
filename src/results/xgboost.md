@@ -2,23 +2,23 @@
 
 ## Discussion_type
 
-Accuracy: 0.7317073170731707
-Precision: 0.7023987466159552
-Recall: 0.7317073170731707
-F1: 0.7152875718514169
+Accuracy: 0.7348066298342542
+Precision: 0.7375789265982636
+Recall: 0.7348066298342542
+F1: 0.7173026975759826
                    precision    recall  f1-score   support
 
-     Deliberation       0.68      0.72      0.70        18
-Imaginative Entry       0.00      0.00      0.00         4
+     Deliberation       0.60      0.64      0.62        45
+Imaginative Entry       1.00      0.17      0.29         6
             Other       0.00      0.00      0.00         2
-        Procedure       0.71      0.56      0.62         9
-          Seminar       0.81      0.88      0.84        67
-           Social       0.64      0.64      0.64        14
-               UX       0.50      0.44      0.47         9
+        Procedure       0.86      0.46      0.60        13
+          Seminar       0.78      0.92      0.85        89
+           Social       0.92      0.69      0.79        16
+               UX       0.50      0.40      0.44        10
 
-         accuracy                           0.73       123
-        macro avg       0.48      0.46      0.47       123
-     weighted avg       0.70      0.73      0.72       123
+         accuracy                           0.73       181
+        macro avg       0.67      0.47      0.51       181
+     weighted avg       0.74      0.73      0.72       181
 
 ## Uptake
 
