@@ -1,4 +1,4 @@
-course,book_id,bookclub,chat_crew,pseudonym,message,time,is_answer,page,response_number,r2_discussion_type
+course,book_id,bookclub,chat_crew,pseudonym,message,time,is_answer,page,response_number,discussion_type
 PIM P1,260,1,1,pim-01,Hello. ,2020-10-20 17:06:00,False,10,3.1,Social
 PIM P1,260,1,1,pim-01,My assumption is,2020-10-20 17:06:00,False,10,3.1,Seminar
 PIM P1,260,1,1,pim-01,that the emphasis on barbarism implies that she sent him to the lion.,2020-10-20 17:06:00,False,10,3.1,Seminar
