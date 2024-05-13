@@ -18,7 +18,7 @@ From: nvidia/cuda:12.4.1-devel-ubuntu22.04
     pip3 install sentence-transformers
     pip3 install beautifulsoup4
     pip3 install lxml
-    pip3 install faiss-
+    pip3 install faiss-gpu
     pip3 install openpyxl
 
 %environment
