@@ -31,7 +31,7 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 
 with open("./tokens/hugging_face_token.txt", "r") as file:
     ACCESS_TOKEN = file.read().strip()
-    
+
 models = {
     "gemma": "google/gemma-7b", # NOT WORKING
     "mistral-22B": "mistralai/Mixtral-8x22B-Instruct-v0.1", # 
@@ -48,8 +48,8 @@ print(f'Model: {LLM_MODEL}')
 
 EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
-CLASS = 'uptake'
-CLASS_IN_CODEBOOK = 'Uptake'
+CLASS = 'discussion_type'
+CLASS_IN_CODEBOOK = 'Discussion'
 
 def parse_xml(xml_path):
     tree = ET.parse(xml_path)
@@ -87,8 +87,6 @@ def find_first(sentence, items):
         if index != -1 and index < first:
             first = index
             item = i
-    if item is None:
-        item = 'None'
     return item
 
 class LLM:
@@ -96,42 +94,37 @@ class LLM:
                  codebook_file,
                  use_xmls = [],
                  use_websites = [],
-                 use_history = True,
+                 use_custom_history = True,
                  use_buffer = False,
                  quantize= False,
-                 window_size= 3,
-                 text_field= 'message',
-                 combine_fields = [],
-                 separator = ': ',
-                 dataset_csv_file = None
+                 dataset = None
                  ):
-
-        self.quantize = quantize
         self.initialize_model(quantize)
-        self.use_history = use_history
-        self.classes = []
-        self.codebook = self.get_codebook(codebook_file)
-        self.window_size = window_size
-        self.text_field = text_field
-        self.combine_fields = combine_fields
+        self.use_custom_history = use_custom_history
 
         if len(use_xmls) != 0 or len(use_websites) != 0:
-            self.initialize_retriever_chain(xml=use_xmls, web=use_websites)
+            self.retriever_chain = self.get_retriever_chain(xml=use_xmls, web=use_websites)
         else:
             self.retriever_chain = None
 
-        self.use_buffer = use_buffer
+        self.classes = []
+        self.codebook = self.get_codebook(codebook_file)
+
         if use_buffer:
-            self.initialize_buffer()
+            self.memory_buffer = ConversationBufferWindowMemory(
+                memory_key="chat_history", 
+                return_messages=True, 
+                output_key="answer", 
+                llm=self.llm,
+                k=8,
+            )
         else:
             self.memory_buffer = None
+        
+        if dataset is not None:
+            self.train(dataset)
 
-        if dataset_csv_file is not None:
-            self.train_data, self.test_data = self.preprocess_dataset(dataset_csv_file)
-        else:
-            self.train_data, self.test_data = None, None
-
-        self.initialize_llm()
+        self.llm = self.initialize_llm()
         self.llm_chain = self.get_chain()
     
     def initialize_model(self, quantize = False):
@@ -185,13 +178,18 @@ class LLM:
             max_new_tokens=500,
             repetition_penalty=1.5,
         )
-        self.llm = HuggingFacePipeline(pipeline=generate_text)
 
-    def initialize_retriever_chain(self, xml = [], web = []):
+        llm = HuggingFacePipeline(pipeline=generate_text)
+        return llm
+
+    def get_retriever_chain(self, xml = [], 
+                        web = []):
         docs = []
         for xml_path in xml:
             docs += parse_xml(xml_path)
+
         docs += fetch_websites(web)
+        
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         story_splitted = text_splitter.split_documents(docs)
 
@@ -199,39 +197,38 @@ class LLM:
             model_name=EMBED_MODEL,
             model_kwargs={"device": "cuda"},
         )
+        
         vectorstore = FAISS.from_documents(story_splitted, embedding)
         retreiver = vectorstore.as_retriever(
             search_type="similarity",
             k=6,
         )
+
         story_retriever_prompt = PromptTemplate.from_messages([
             ("system", "You are an helpful AI assistant that knows everything about the story in the documents.\nYou need to retrieve the most relevant document based on the following chat:"),
-            ("placeholder", "{history}"),
+            ("placeholder", "{chat_history}"),
         ])
-        self.retriever_chain = create_history_aware_retriever(
+        
+        retriever_chain = create_history_aware_retriever(
             llm=self.llm,
             retriever=retreiver,
             prompt = story_retriever_prompt,
         )
-
-    def initialize_buffer(self):
-        self.memory_buffer = ConversationBufferWindowMemory(
-                memory_key="history", 
-                return_messages=True, 
-                output_key="answer", 
-                llm=self.llm,
-                k=self.window_size,
-            )
+        return retriever_chain
     
-    def format_row_codebook(self, row):
+    def get_codebook_row(self, row):
         class_message = f"Class: '''{row['Term']}'''\n"
+
         if row['Definition'] is not None:
             definition = " ".join(row['Definition'].split('\n'))
             class_message += f"Definition: '''{definition}'''\n"
+
         if row['Example'] is not None:
             example = " ".join(row['Example'].split('\n'))
             class_message += f"Example: '''{example}'''\n"
+        
         class_message += "\n"
+
         return class_message
 
     def get_codebook(self, codebook_file):
@@ -241,13 +238,28 @@ class LLM:
         codebook.drop(columns=['Class'], inplace=True)
         codebook['Term'] = codebook['Term'].map(lambda x: x.strip())
         self.classes = codebook['Term'].tolist()
-        codebook_list = codebook.apply(self.format_row_codebook, axis=1)
+        codebook_list = codebook.apply(self.get_codebook_row, axis=1)
         codebook_list = "".join(codebook_list)
         return codebook_list
         
     def clear_memory(self):
         if self.memory_buffer:
             self.memory_buffer.clear()
+
+    def format_prompt(self, dataset):
+        if self.use_custom_history:
+            requests = dataset.map(lambda x: {'input': x['chat'], 'chat_history': [("human", chat) for chat in x['chat_history'].split('\n')] if x['chat_history'] is not None else []})
+        else:
+            requests = dataset.map(lambda x: {'input': x['chat'],})
+
+        if self.retriever_chain is not None:
+            list_docs = self.retriever_chain.batch(requests)
+            for i in range(len(requests)):
+                requests[i]['context'] = list_docs[i]
+        
+        messages = self.get_messages()
+        prompts = map(lambda x: ChatPromptTemplate.from_messages(self.get_messages()).format(x), requests)
+        return prompts
 
     def get_messages(self):
         if self.codebook is None:
@@ -260,12 +272,13 @@ class LLM:
         if self.retriever_chain is not None:
             messages.append(("system", "Here are some relevant documents that might help you to classify the sentence:\n'''\n{context}\n'''\n"))
         
-        if self.use_history or self.memory_buffer is not None:
+        if self.use_custom_history or self.memory_buffer is not None:
             messages.append(("system", "Here is the chat history of the children discussion:"))
-            messages.append(("placeholder", "{history}"))
+            messages.append(("placeholder", "{chat_history}"))
         
         messages.append(("system", "Classify the sentence into one class of the codebook."))
         messages.append(("human", "{input}"))
+
         return messages
     
     def get_chain(self):
@@ -276,28 +289,29 @@ class LLM:
             chain = template | self.llm
         return chain
 
-    def predict_single(self, sentence, history = None):
+    def single_predict(self, sentence, chat_history = None):
         if self.llm_chain is None:
             raise Exception("Chain is not initialized")
         
         request = {}
         request['input'] = sentence
-
-        if self.memory_buffer is not None and history is None:
-            history = self.memory_buffer.load_memory_variables({})
-            request['history'] = history['history']
         
-        if self.use_history:
-            if history is None:
-                request['history'] = ''
+        if self.memory_buffer is not None and chat_history is None:
+            history = self.memory_buffer.load_memory_variables({})
+            request['chat_history'] = history['chat_history']
+
+        if self.use_custom_history:
+            if chat_history is None:
+                request['chat_history'] = ''
             else:
-                request['history'] = history
+                request['chat_history'] = chat_history
         
         if self.retriever_chain is not None:
             docs = self.retriever_chain.invoke(request)
             request['context'] = docs
         
         response = self.llm_chain.invoke(request)
+
         answer = find_first(response, self.classes)
 
         if self.memory_buffer is not None:
@@ -305,24 +319,19 @@ class LLM:
         
         return answer
 
-    def format_requests(self, data):
-        if self.use_history:
-            requests = data.apply(lambda x: {'input': x['chat'], 'history': [("human", chat) for chat in x['history'].split('\n')] if not pd.isna(x['history']) else []}, axis=1)
+    def predict_batch(self, dataset):
+        if self.llm_chain is None:
+            raise Exception("Chain is not initialized")
+        
+        if self.use_custom_history:
+            requests = dataset.map(lambda x: {'input': x['chat'], 'chat_history': [("human", chat) for chat in x['chat_history'].split('\n')] if x['chat_history'] is not None else []})
         else:
-            requests = data.apply(lambda x: {'input': x['chat'],}, axis=1)
+            requests = dataset.map(lambda x: {'input': x['chat']})
 
         if self.retriever_chain is not None:
             list_docs = self.retriever_chain.batch(requests)
             for i in range(len(requests)):
                 requests[i]['context'] = list_docs[i]
-        
-        return requests
-
-    def predict_batch(self, data):
-        if self.llm_chain is None:
-            raise Exception("Chain is not initialized")
-        
-        requests = self.format_requests(data)
         
         responses = self.llm_chain.batch(requests)
 
@@ -330,53 +339,13 @@ class LLM:
         for response in responses:
             print(response)
             answer = find_first(response, self.classes)
+            if answer is None:
+                answer = 'None'
             answers.append(answer)
 
         return answers
 
-    def preprocess_dataset(self, dataset_csv_file):
-        data = pd.read_csv(dataset_csv_file)
-        
-        data[self.text_field] = data[self.combine_fields].apply(lambda x: self.separator.join(x.dropna().astype(str)), axis=1)
-
-        history = []
-        for i in range(len(data)):
-            if i >= 1 and not data.iloc[i][['book_id', 'bookclub', 'course']].equals(data.iloc[i-1][['book_id', 'bookclub', 'course']]):
-                history = []
-
-            data.at[i, 'history'] = '\n'.join(history) if history else pd.NA
-
-            history.append(data.iloc[i][self.text_field])
-            if len(history) > self.window_size:
-                history.pop(0)
-
-        train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
-
-        return train_data, test_data
-
-    def get_trainable_dataset(self, data):
-        requests = data.apply(lambda x: {'input': x[self.text_field], 'history': [("human", chat) for chat in x['history'].split('\n')] if not pd.isna(x['history']) else []}, axis = 1)
-        messages = self.get_messages()
-        prompt_template = ChatPromptTemplate.from_messages(messages)
-        prompts = prompt_template.batch(list(requests))
-        prompts = list(map(lambda x: x.to_string(), prompts))
-
-        dataset_dict = DatasetDict({
-            'train': Dataset.from_dict({'text': prompts, 'label': data[CLASS]})
-        })
-
-        # train, validation and test split
-        train_test_dataset = dataset_dict['train'].train_test_split(test_size=0.2, seed=42)
-
-        dataset_dict['train'] = train_test_dataset['train']
-        dataset_dict['validation'] = train_test_dataset['test']
-        return dataset_dict
-
-    def train(self):
-        if self.train_data is None:
-            raise Exception("No dataset found, please add dataset while initializing.")
-
-        dataset = self.get_trainable_dataset(self.train_data)
+    def train(self, dataset):
 
         peft_config = LoraConfig(
             lora_alpha=32,
@@ -399,42 +368,57 @@ class LLM:
             max_steps=500,
             warmup_ratio=0.3,
             lr_scheduler_type="constant",
-            report_to="none"
+            report_to="none",
+            label_names = [CLASS]
         )
+
+        dataset = dataset.train_test_split(test_size=0.2, seed=42)
+        X_train, X_val = dataset['train'], dataset['test']
+
+        response_template = "answer:"
+        collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer=self.tokenizer)
 
         trainer = SFTTrainer(
             model=self.model,
-            train_dataset=dataset['train'],
-            eval_dataset=dataset['validation'],
+            train_dataset=X_train,
+            eval_dataset=X_val,
+            formatting_func = self.format_prompt,
+            data_collator=collator,
             peft_config=peft_config,
-            max_seq_length=2024,
+            max_seq_length=1024,
+            tokenizer=self.tokenizer,
             args=training_arguments,
         )
 
         trainer.train()
 
-    def test(self):
-        y_test = self.test_data[CLASS]
-        y_pred = self.predict_batch(self.test_data)
-        
-        print('Accuracy:', accuracy_score(y_test, y_pred))
-        print('Precision:', precision_score(y_test, y_pred, average='weighted', zero_division=0))
-        print('Recall:', recall_score(y_test, y_pred, average='weighted', zero_division=0))
-        print('F1:', f1_score(y_test, y_pred, average='weighted', zero_division=0))
 
-        print(classification_report(y_test, y_pred, zero_division=0))
+# Test the model
+# Retrive the dataset to test and train the model
+data = load_dataset('csv', data_files='data/cleaned_data.csv')
+
+# split into train, validation and test
+data = data['train'].train_test_split(test_size=0.2, seed=42)
+X_train, X_test = data['train'], data['test']
+y_test = X_test[CLASS]
 
 
-# Initialize the model
 my_llm_classifier = LLM(codebook_file = './data/codebook.xlsx',
                         use_xmls = [],#['./data/LadyOrThetigerIMapBook.xml'],
                         use_websites = [],
-                        use_history = True,
+                        use_custom_history = True,
                         use_buffer = False,
                         quantize=False,
-                        window_size= 3,
-                        text_field= 'message',
-                        combine_fields = [],
-                        separator = ': ',
-                        dataset_csv_file= '/data/cleaned_data.csv'
+                        #dataset= X_train
                         )
+
+
+y_pred = my_llm_classifier.predict_batch(X_test)
+
+print('Accuracy:', accuracy_score(y_test, y_pred))
+print('Precision:', precision_score(y_test, y_pred, average='weighted', zero_division=0))
+print('Recall:', recall_score(y_test, y_pred, average='weighted', zero_division=0))
+print('F1:', f1_score(y_test, y_pred, average='weighted', zero_division=0))
+
+print(classification_report(y_test, y_pred, zero_division=0))
+    

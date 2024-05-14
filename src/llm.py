@@ -13,11 +13,9 @@ from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_sc
 from sklearn.metrics import classification_report
 
 #from IPython.display import print
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 from langchain.prompts import PromptTemplate
-from langchain.text_splitter import RecursiveCharacterTextSplitter, HTMLHeaderTextSplitter, TokenTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains import create_history_aware_retriever
-from langchain.memory.buffer import ConversationBufferMemory
 from langchain.memory.buffer_window import ConversationBufferWindowMemory
 from langchain_community.document_loaders import BSHTMLLoader
 from langchain_community.embeddings.huggingface import HuggingFaceEmbeddings
@@ -25,23 +23,23 @@ from langchain_community.llms.huggingface_pipeline import HuggingFacePipeline
 from langchain_community.vectorstores.faiss import FAISS
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_retrieval_chain
 from langchain_community.docstore.document import Document
 
-ACCESS_TOKEN = "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"
+with open("./tokens/hugging_face_token.txt", "r") as file:
+    ACCESS_TOKEN = file.read().strip()
 
 models = {
-    "gemma": "google/gemma-7b",
-    "mistral-22b": "mistralai/Mixtral-8x22B-v0.1", # need access
-    "mistral-7b" : "mistralai/Mistral-7B-Instruct-v0.2",
-    "llama-2" : "meta-llama/Llama-2-13b-chat-hf", # Need access
-    "llama-3-8" : "meta-llama/Meta-Llama-3-8B-Instruct", # Request access
-    "llama-3-70" : "meta-llama/Meta-Llama-3-70B-Instruct", # Request access
-    "vicuna": "lmsys/vicuna-7b-v1.5",
-    "openhermes" : "teknium/OpenHermes-13B"
+    "gemma": "google/gemma-7b", # NOT WORKING
+    "mistral-22B": "mistralai/Mixtral-8x22B-Instruct-v0.1", # 
+    "mistral-7B" : "mistralai/Mistral-7B-Instruct-v0.2",
+    "llama-grand-2" : "meta-llama/Meta-Llama-Grand-2-8B",
+    "llama-2-13B" : "meta-llama/Llama-2-13b-chat-hf", 
+    "llama-2-70B" : "meta-llama/Llama-2-70b-chat-hf", 
+    "llama-3-8" : "meta-llama/Meta-Llama-3-8B-Instruct",
+    "llama-3-70" : "meta-llama/Meta-Llama-3-70B-Instruct",
 }
 
-LLM_MODEL = models["gemma"]
+LLM_MODEL = models["llama-3-70"]
 print(f'Model: {LLM_MODEL}')
 
 EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
@@ -180,7 +178,7 @@ class LLM:
                 token=ACCESS_TOKEN
             )
         
-        self.model.config.use_cache = True
+        self.model.config.use_cache = False
         self.model.eval()
 
         tokenizer = transformers.AutoTokenizer.from_pretrained(
@@ -317,11 +315,10 @@ class LLM:
         if self.llm_chain is None:
             raise Exception("Chain is not initialized")
         
-        requests = []
         if self.use_custom_history:
-            dataset.map(lambda x: requests.append({'input': x['chat'], 'chat_history': x['chat_history']}))
+            requests = dataset.map(lambda x: {'input': x['chat'], 'chat_history': x['chat_history']})
         else:
-            dataset.map(lambda x: requests.append({'input': x['chat']}))
+            requests = dataset.map(lambda x: {'input': x['chat']})
 
         if self.retriever_chain is not None:
             list_docs = self.retriever_chain.batch(requests)
@@ -332,83 +329,13 @@ class LLM:
 
         answers = []
         for response in responses:
+            print(response)
             answer = find_first(response, self.classes)
             if answer is None:
                 answer = 'None'
             answers.append(answer)
 
         return answers
-
-    def train(self, X, y):
-        lora_alpha = 32
-        lora_dropout = 0.1
-        lora_r = 16
-
-        peft_config = LoraConfig(
-            lora_alpha=lora_alpha,
-            lora_dropout=lora_dropout,
-            r=lora_r,
-            bias="none",
-            task_type="CAUSAL_LM"
-        )
-        
-        lora_model = get_peft_model(model, peft_config)
-
-        output_dir = "./results"
-        per_device_train_batch_size = 1
-        gradient_accumulation_steps = 1
-        optim = "paged_adamw_32bit" #specialization of the AdamW optimizer that enables efficient learning in LoRA setting.
-        save_steps = 100
-        logging_steps = 10
-        learning_rate = 2e-4
-        max_grad_norm = 0.3
-        max_steps = 500
-        warmup_ratio = 0.03
-        lr_scheduler_type = "constant"
-
-        training_arguments = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=per_device_train_batch_size,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            optim=optim,
-            save_steps=save_steps,
-            logging_steps=logging_steps,
-            learning_rate=learning_rate,
-            fp16=True,
-            max_grad_norm=max_grad_norm,
-            max_steps=max_steps,
-            warmup_ratio=warmup_ratio,
-            group_by_length=True,
-            lr_scheduler_type=lr_scheduler_type,
-            report_to="none"
-        )
-
-        max_seq_length = 512
-
-        trainer = SFTTrainer(
-            model=model,
-            train_dataset=dataset,
-            peft_config=peft_config,
-            dataset_text_field="text",
-            max_seq_length=max_seq_length,
-            tokenizer=tokenizer,
-            args=training_arguments,
-        )
-
-        return True
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 my_llm_classifier = LLM(codebook_file = './data/codebook.xlsx',
                         use_xmls = [],#['./data/LadyOrThetigerIMapBook.xml'],
