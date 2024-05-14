@@ -28,59 +28,26 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains import create_retrieval_chain
 from langchain_community.docstore.document import Document
 
-ACCESS_TOKEN = "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"
+ACCESS_TOKEN = "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"
 
-LLM_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
+models = {
+    "gemma": "google/gemma-7b",
+    "mistral-22b": "mistralai/Mixtral-8x22B-v0.1", # need access
+    "mistral-7b" : "mistralai/Mistral-7B-Instruct-v0.2",
+    "llama-2" : "meta-llama/Llama-2-13b-chat-hf", # Need access
+    "llama-3-8" : "meta-llama/Meta-Llama-3-8B-Instruct", # Request access
+    "llama-3-70" : "meta-llama/Meta-Llama-3-70B-Instruct", # Request access
+    "vicuna": "lmsys/vicuna-7b-v1.5",
+    "openhermes" : "teknium/OpenHermes-13B"
+}
+
+LLM_MODEL = models["gemma"]
+print(f'Model: {LLM_MODEL}')
+
 EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 CLASS = 'discussion_type'
 CLASS_IN_CODEBOOK = 'Discussion'
-
-def initialize_llm():
-    # INITIALIZE MODEL
-    bnb_config = transformers.BitsAndBytesConfig(
-        load_in_4bit=True, # loading in 4 bit
-        bnb_4bit_quant_type="nf4", # quantization type
-        bnb_4bit_use_double_quant=True, # nested quantization
-        bnb_4bit_compute_dtype=torch.bfloat16,
-    )
-
-    model_config = transformers.AutoConfig.from_pretrained(
-        pretrained_model_name_or_path=LLM_MODEL,
-        token=ACCESS_TOKEN,
-    )
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        pretrained_model_name_or_path=LLM_MODEL,
-        config=model_config,
-        #quantization_config=bnb_config, # we introduce the bnb config here.
-        device_map="auto"
-    )
-    
-    model.config.use_cache = False
-    
-    model.eval()
-
-    tokenizer = transformers.AutoTokenizer.from_pretrained(
-        pretrained_model_name_or_path=LLM_MODEL,
-        trust_remote_code=True,
-        token=ACCESS_TOKEN,
-    )
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
-
-    #TODO: finetune the model
-    generate_text = transformers.pipeline(
-        task="text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        return_full_text=False,
-        #temperature=0.0,
-        max_new_tokens=8192,
-        repetition_penalty=1.1,
-    )
-
-    llm = HuggingFacePipeline(pipeline=generate_text)
-    return llm
 
 def parse_xml(xml_path):
     tree = ET.parse(xml_path)
@@ -110,16 +77,22 @@ def fetch_websites(sites):
             docs.extend(BSHTMLLoader(filename, open_encoding = 'utf8').load())
     return docs
 
+def find_first(sentence, items):
+    first = len(sentence)
+    item = None
+    for i in items:
+        index = sentence.find(i)
+        if index != -1 and index < first:
+            first = index
+            item = i
+    return item
+
 start = """
 You are a helpful AI classifier that knows everything about discourse analysis and can help children to classify the discussion they are having.
-"""
-
-codebook_template = """
 You have to classify the NEW_SENTENCE with one term from the codebook here:
 ***
 {codebook}
 ***
-
 If you failed to classify the sentence, return None.
 """
 
@@ -137,14 +110,12 @@ The children are discussing a topic. Here is the chat history:
 ]
 """
 
-input = """
+end = """
 What class does the following sentence belong to?
 
 ### NEW_SENTENCE: "{input}"
 
 Return the class from the codebook or None if you can't classify it.
-Return the class name enclosed in **double asterisks**.
-
 ### ANSWER:"""
 
 class LLM:
@@ -155,12 +126,13 @@ class LLM:
                  use_custom_history = True,
                  use_buffer = False,
                  ):
-        self.llm = initialize_llm()
+        self.llm = self.initialize_llm()
         if len(use_xmls) != 0 or len(use_websites) != 0:
             self.retriever_chain = self.get_retriever_chain(xml=use_xmls, web=use_websites)
         else:
             self.retriever_chain = None
 
+        self.classes = []
         self.codebook = self.get_codebook(codebook_file)
 
         if use_buffer:
@@ -177,6 +149,61 @@ class LLM:
         self.use_custom_history = use_custom_history
 
         self.llm_chain = self.get_chain()
+    
+    def initialize_llm(self, quantize = False):
+        # INITIALIZE MODEL
+        model_config = transformers.AutoConfig.from_pretrained(
+            pretrained_model_name_or_path=LLM_MODEL,
+            token=ACCESS_TOKEN,
+        )
+
+        if quantize:
+            bnb_config = transformers.BitsAndBytesConfig(
+                load_in_4bit=True, # loading in 4 bit
+                bnb_4bit_quant_type="nf4", # quantization type
+                bnb_4bit_use_double_quant=True, # nested quantization
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
+            self.model = transformers.AutoModelForCausalLM.from_pretrained(
+                pretrained_model_name_or_path=LLM_MODEL,
+                config=model_config,
+                quantization_config=bnb_config, # we introduce the bnb config here.
+                device_map="auto",
+                token=ACCESS_TOKEN
+            )
+        else:
+
+            self.model = transformers.AutoModelForCausalLM.from_pretrained(
+                pretrained_model_name_or_path=LLM_MODEL,
+                config=model_config,
+                device_map="auto",
+                token=ACCESS_TOKEN
+            )
+        
+        self.model.config.use_cache = True
+        self.model.eval()
+
+        tokenizer = transformers.AutoTokenizer.from_pretrained(
+            pretrained_model_name_or_path=LLM_MODEL,
+            trust_remote_code=True,
+            token=ACCESS_TOKEN,
+        )
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "right"
+
+        #TODO: finetune the model
+        generate_text = transformers.pipeline(
+            task="text-generation",
+            model=self.model,
+            tokenizer=tokenizer,
+            return_full_text=False,
+            #temperature=0.0,
+            max_new_tokens=15,
+            repetition_penalty=1.1,
+        )
+
+        llm = HuggingFacePipeline(pipeline=generate_text)
+        return llm
 
     def get_retriever_chain(self, xml = [], 
                         web = [],
@@ -185,10 +212,8 @@ class LLM:
                             You are an helpful AI assistant that knows everything about the story in the documents.
                             You need to retrieve the most relevant document based on the following chat:
 
-                            CHAT_HISTORY:
+                            CHAT:
                             {chat_history}
-
-                            CURRENT_SENTENCE:
                             {input}
                             """):
         docs = []
@@ -225,6 +250,9 @@ class LLM:
         codebook[['Class', 'Term']] = codebook['Term'].str.split(':', expand=True)
         codebook = codebook[codebook['Class'] == CLASS_IN_CODEBOOK]
         codebook.drop(columns=['Class'], inplace=True)
+        codebook['Term'] = codebook['Term'].map(lambda x: x.strip())
+        self.classes = codebook['Term'].tolist()
+        print(self.classes)
         return codebook.to_string(index=False)
         
     def clear_memory(self):
@@ -232,20 +260,18 @@ class LLM:
             self.memory_buffer.clear()
 
     def get_template(self):
-        final_template = start
-
-        if self.retriever_chain is not None:
-            final_template += context
-    
         if self.codebook is None:
             raise Exception("Codebook is not initialized")
         
-        final_template += codebook_template.format(codebook=self.codebook)
+        final_template = start.format(codebook=self.codebook)
+
+        if self.retriever_chain is not None:
+            final_template += context
         
         if self.use_custom_history or self.memory_buffer is not None:
             final_template += history
         
-        final_template += input
+        final_template += end
 
         return ChatPromptTemplate.from_template(final_template)
     
@@ -279,30 +305,23 @@ class LLM:
             request['context'] = docs
         
         response = self.llm_chain.invoke(request)
-        print(response)
 
-        answer = response.split('**')[1].strip()
+        answer = find_first(response, self.classes)
 
         if self.memory_buffer is not None:
             self.memory_buffer.save_context(inputs={'input': sentence}, outputs={'answer': answer})
         
         return answer
 
-    def predict_batch(self, sentences, chat_histories = None):
+    def predict_batch(self, dataset):
         if self.llm_chain is None:
             raise Exception("Chain is not initialized")
         
         requests = []
-        for i in range(len(sentences)):
-            request = {}
-            request['input'] = sentences[i]
-
-            if self.use_custom_history:
-                if chat_histories is None:
-                    request['chat_history'] = ''
-                else:
-                    request['chat_history'] = chat_histories[i]
-            requests.append(request)
+        if self.use_custom_history:
+            dataset.map(lambda x: requests.append({'input': x['chat'], 'chat_history': x['chat_history']}))
+        else:
+            dataset.map(lambda x: requests.append({'input': x['chat']}))
 
         if self.retriever_chain is not None:
             list_docs = self.retriever_chain.batch(requests)
@@ -310,37 +329,109 @@ class LLM:
                 requests[i]['context'] = list_docs[i]
         
         responses = self.llm_chain.batch(requests)
-        return responses
+
+        answers = []
+        for response in responses:
+            answer = find_first(response, self.classes)
+            if answer is None:
+                answer = 'None'
+            answers.append(answer)
+
+        return answers
+
+    def train(self, X, y):
+        lora_alpha = 32
+        lora_dropout = 0.1
+        lora_r = 16
+
+        peft_config = LoraConfig(
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+            r=lora_r,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+        
+        lora_model = get_peft_model(model, peft_config)
+
+        output_dir = "./results"
+        per_device_train_batch_size = 1
+        gradient_accumulation_steps = 1
+        optim = "paged_adamw_32bit" #specialization of the AdamW optimizer that enables efficient learning in LoRA setting.
+        save_steps = 100
+        logging_steps = 10
+        learning_rate = 2e-4
+        max_grad_norm = 0.3
+        max_steps = 500
+        warmup_ratio = 0.03
+        lr_scheduler_type = "constant"
+
+        training_arguments = TrainingArguments(
+            output_dir=output_dir,
+            per_device_train_batch_size=per_device_train_batch_size,
+            gradient_accumulation_steps=gradient_accumulation_steps,
+            optim=optim,
+            save_steps=save_steps,
+            logging_steps=logging_steps,
+            learning_rate=learning_rate,
+            fp16=True,
+            max_grad_norm=max_grad_norm,
+            max_steps=max_steps,
+            warmup_ratio=warmup_ratio,
+            group_by_length=True,
+            lr_scheduler_type=lr_scheduler_type,
+            report_to="none"
+        )
+
+        max_seq_length = 512
+
+        trainer = SFTTrainer(
+            model=model,
+            train_dataset=dataset,
+            peft_config=peft_config,
+            dataset_text_field="text",
+            max_seq_length=max_seq_length,
+            tokenizer=tokenizer,
+            args=training_arguments,
+        )
+
+        return True
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 my_llm_classifier = LLM(codebook_file = './data/codebook.xlsx',
-                        use_xmls = [], #['./data/LadyOrThetigerIMapBook.xml'],
+                        use_xmls = [],#['./data/LadyOrThetigerIMapBook.xml'],
                         use_websites = [],
-                        use_custom_history = False,
+                        use_custom_history = True,
                         use_buffer = False
                         )
 
 # Test the model
 # Retrive the dataset to test and train the model
-dataset = pd.read_csv('cleaned_data/discussion_type.csv')
-y = dataset[CLASS].values
-dataset.drop(columns=[CLASS], inplace=True)
-answers = []
-for i in range(len(dataset)):
-    if i >= 1 and not dataset.iloc[i][['book_id', 'bookclub', 'course']].equals(dataset.iloc[i-1][['book_id', 'bookclub', 'course']]):
-        memory_buffer.clear()
+data = load_dataset('csv', data_files='data/cleaned_data.csv')
 
-    sentence = dataset.iloc[i]['message']
-    answer = categorize(sentence, codebook, memory_buffer)
-    print(answer)
+# split into train, validation and test
+data = data['train'].train_test_split(test_size=0.2, seed=42)
+X_train, X_test = data['train'], data['test']
+y_train, y_test = X_train[CLASS], X_test[CLASS]
 
-    answers.append(answer)
+y_pred = my_llm_classifier.predict_batch(X_test)
 
-print('Accuracy:', accuracy_score(y, answers))
-print('Precision:', precision_score(y, answers, average='weighted', zero_division=0))
-print('Recall:', recall_score(y, answers, average='weighted', zero_division=0))
-print('F1:', f1_score(y, answers, average='weighted', zero_division=0))
+print('Accuracy:', accuracy_score(y_test, y_pred))
+print('Precision:', precision_score(y_test, y_pred, average='weighted', zero_division=0))
+print('Recall:', recall_score(y_test, y_pred, average='weighted', zero_division=0))
+print('F1:', f1_score(y_test, y_pred, average='weighted', zero_division=0))
 
-print(classification_report(y, answers, zero_division=0))
+print(classification_report(y_test, y_pred, zero_division=0))
     
