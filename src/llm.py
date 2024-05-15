@@ -4,11 +4,12 @@ from pathlib import Path
 import joblib
 import requests
 import torch
-import transformers
+from transformers import AutoConfig, BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, pipeline, TrainingArguments
 import xml.etree.ElementTree as ET
 import re
 import pandas as pd
-from datasets import load_dataset
+from datasets import load_dataset, Dataset, DatasetDict
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
 from sklearn.metrics import classification_report
 
@@ -25,9 +26,13 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.docstore.document import Document
 
+from peft import LoraConfig, PeftConfig, get_peft_model
+
+from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
+
 with open("./tokens/hugging_face_token.txt", "r") as file:
     ACCESS_TOKEN = file.read().strip()
-
+    
 models = {
     "gemma": "google/gemma-7b", # NOT WORKING
     "mistral-22B": "mistralai/Mixtral-8x22B-Instruct-v0.1", # 
@@ -39,13 +44,10 @@ models = {
     "llama-3-70" : "meta-llama/Meta-Llama-3-70B-Instruct",
 }
 
-LLM_MODEL = models["llama-3-70"]
+LLM_MODEL = models["mistral-7B"]
 print(f'Model: {LLM_MODEL}')
 
 EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
-
-CLASS = 'discussion_type'
-CLASS_IN_CODEBOOK = 'Discussion'
 
 def parse_xml(xml_path):
     tree = ET.parse(xml_path)
@@ -83,86 +85,182 @@ def find_first(sentence, items):
         if index != -1 and index < first:
             first = index
             item = i
+    if item is None:
+        item = 'None'
     return item
 
-start = """
-You are a helpful AI classifier that knows everything about discourse analysis and can help children to classify the discussion they are having.
-You have to classify the NEW_SENTENCE with one term from the codebook here:
-***
-{codebook}
-***
-If you failed to classify the sentence, return None.
-"""
+def compute_metrics(pred, classes = None):
+    labels = pred.label_ids
+    responses = pred.predictions
 
-context = """
-You can use the following context, if it is relevant.
-'''
-{context}
-'''
-"""
+    preds = [find_first(response) for response in responses]
+    
+    # Calculate accuracy
+    accuracy = accuracy_score(labels, preds)
 
-history = """
-The children are discussing a topic. Here is the chat history:
-[
-{chat_history}
-]
-"""
+   # Calculate precision, recall, and F1-score
+    precision = precision_score(labels, preds, average='weighted')
+    recall = recall_score(labels, preds, average='weighted')
+    f1 = f1_score(labels, preds, average='weighted')
+    
+    return {
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1
+    }
 
-end = """
-What class does the following sentence belong to?
+def get_messages(use_history,
+                 use_context,
+                     ):
+    messages = []
+    ## Initial
+    messages.append(("system", "You are a helpful AI classifier that knows everything about discourse analysis and can help children to classify their discussion.\n\
+                     Classify the new sentence into one of the classes from the codebook:\n\
+                     CODEBOOK:\n\
+                     {codebook}\n\
+                     ###\n\
+                     If you failed to classify the sentence, return None instead of caming up with a solution.\n"))
 
-### NEW_SENTENCE: "{input}"
+    ### Context
+    if use_context:
+        messages.append(("assistant", "Here are some relevant documents that might help you to classify the sentence:\n\
+                         '''\n\
+                         {context}\n\
+                         '''\n\
+                         "))
+    
+    ### History
+    if use_history:
+        messages.append(("system", "You can use the following conversation history if is relevant:"))
+        messages.append(("placeholder", "{history}"))
+    
+    ### Final input
+    messages.append(("system", "Classify the following sentence into one class of the codebook."))
+    messages.append(("human", "{input}"))
+    #messages.append(("user", "answer:"))
 
-Return the class from the codebook or None if you can't classify it.
-### ANSWER:"""
+    return messages
+
+class Codebook:
+    def __init__(self,
+                 codebook_excel_file) -> None:
+        
+        codebook = pd.read_excel(codebook_excel_file)
+        codebook[['Class', 'Term']] = codebook['Term'].str.split(':', expand=True)
+        codebook['Term'] = codebook['Term'].map(lambda x: x.strip())
+        
+        self.codebook = codebook
+
+    def format_row_codebook(self, row):
+        class_message = f"Class: '''{row['Term']}'''\n"
+
+        if not pd.isna(row['Definition']):
+            definition = " ".join(row['Definition'].split('\n'))
+            class_message += f"Definition: '''{definition}'''\n"
+
+        if not pd.isna(row['Example']):
+            example = " ".join(row['Example'].split('\n'))
+            class_message += f"Example: '''{example}'''\n"
+
+        class_message += "\n"
+        return class_message
+
+    def get_codebook_of_class(self, class_to_predict):
+        new_codebook = self.codebook[self.codebook['Class'] == class_to_predict].copy()
+        new_codebook.drop(columns=['Class'], inplace=True)
+        return new_codebook
+
+    def get_classes(self, class_to_predict):
+        return self.get_codebook_of_class(class_to_predict)['Term'].to_list()
+
+    def format_codebook(self, class_to_predict):
+        new_codebook = self.get_codebook_of_class(class_to_predict)
+        codebook_list = new_codebook.apply(self.format_row_codebook, axis=1)
+        codebook_list = "".join(codebook_list)
+        return codebook_list
+    
 
 class LLM:
     def __init__(self, 
-                 codebook_file,
+                 codebook : Codebook,
                  use_xmls = [],
                  use_websites = [],
-                 use_custom_history = True,
+                 use_history = True,
                  use_buffer = False,
+                 quantize= False,
+                
+                 dataset_csv_file = None,
+                 window_size= 3,
+                 text_field= 'message',
+                 history_field = 'history',
+                 combine_fields = [],
+                 separator = ': ',
+                 unique_keys_for_conversation : list = ['book_id', 'bookclub', 'course'],
+                 
                  ):
-        self.llm = self.initialize_llm()
-        if len(use_xmls) != 0 or len(use_websites) != 0:
-            self.retriever_chain = self.get_retriever_chain(xml=use_xmls, web=use_websites)
-        else:
-            self.retriever_chain = None
+        ### CODEBOOK
+        self.codebook = codebook
 
-        self.classes = []
-        self.codebook = self.get_codebook(codebook_file)
+        ### MODEL SPECIFICATIONS
+        self.quantize = quantize
+        self.model = self._build_model()
+        self.tokenizer = self._build_tokenizer()
+        self.llm = self._build_llm()
 
+        ### HISTORY BUFFER AND NORMAL HISTORY SETTING
+        self.use_history = use_history
+        self.use_buffer = use_buffer
         if use_buffer:
             self.memory_buffer = ConversationBufferWindowMemory(
-                memory_key="chat_history", 
+                memory_key="history", 
                 return_messages=True, 
                 output_key="answer", 
                 llm=self.llm,
-                k=8,
+                k=self.window_size,
             )
         else:
             self.memory_buffer = None
-        
-        self.use_custom_history = use_custom_history
 
-        self.llm_chain = self.get_chain()
+        ### RETRIEVER FOR CONTEXT
+        if len(use_xmls) != 0 or len(use_websites) != 0:
+            self.retriever_chain = self._build_retriever_chain(xml=use_xmls, web=use_websites)
+            self.use_context = True
+        else:
+            self.retriever_chain = None
+            self.use_context = False
+
+        ### DATASET ARGUMENTS
+        self.window_size = window_size
+        self.text_field = text_field
+        self.history_field = history_field
+        self.combine_fields = combine_fields
+        self.separator = separator
+        self.unique_keys_for_conversation = unique_keys_for_conversation
+
+        ### DATASET PREPROCESSING AND SPLITTING
+        if dataset_csv_file is not None:
+            self.train_data, self.test_data = self.preprocess_dataset(dataset_csv_file)
+        else:
+            self.train_data, self.test_data = None, None
+
+        ### BUILD CHAIN
+        self.llm_chain = self._build_chain()
     
-    def initialize_llm(self, quantize = False):
+    def _build_model(self):
         # INITIALIZE MODEL
-        model_config = transformers.AutoConfig.from_pretrained(
+        model_config = AutoConfig.from_pretrained(
             pretrained_model_name_or_path=LLM_MODEL,
             token=ACCESS_TOKEN,
         )
-
-        if quantize:
-            bnb_config = transformers.BitsAndBytesConfig(
+        if self.quantize:
+            bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True, # loading in 4 bit
                 bnb_4bit_quant_type="nf4", # quantization type
                 bnb_4bit_use_double_quant=True, # nested quantization
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
-            self.model = transformers.AutoModelForCausalLM.from_pretrained(
+            model = AutoModelForCausalLM.from_pretrained(
                 pretrained_model_name_or_path=LLM_MODEL,
                 config=model_config,
                 quantization_config=bnb_config, # we introduce the bnb config here.
@@ -170,56 +268,51 @@ class LLM:
                 token=ACCESS_TOKEN
             )
         else:
-
-            self.model = transformers.AutoModelForCausalLM.from_pretrained(
+            model = AutoModelForCausalLM.from_pretrained(
                 pretrained_model_name_or_path=LLM_MODEL,
                 config=model_config,
                 device_map="auto",
                 token=ACCESS_TOKEN
             )
-        
-        self.model.config.use_cache = False
-        self.model.eval()
+        model.config.use_cache = True
+        return model
 
-        tokenizer = transformers.AutoTokenizer.from_pretrained(
+    def _build_tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained(
             pretrained_model_name_or_path=LLM_MODEL,
             trust_remote_code=True,
-            token=ACCESS_TOKEN,
+            token=ACCESS_TOKEN
         )
         tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = "right"
+        tokenizer.padding_side = 'right'
+        return tokenizer
+
+    def _build_llm(self):
+        if self.model is None:
+            raise Exception('Model not initialized')
+        if self.tokenizer is None:
+            raise Exception('Tokenizer not initialized')
+        self.model.eval()
 
         #TODO: finetune the model
-        generate_text = transformers.pipeline(
+        generate_text = pipeline(
             task="text-generation",
             model=self.model,
-            tokenizer=tokenizer,
+            tokenizer=self.tokenizer,
             return_full_text=False,
             #temperature=0.0,
-            max_new_tokens=15,
-            repetition_penalty=1.1,
+            max_new_tokens=500,
+            repetition_penalty=1.5,
+            batch_size=2,
         )
-
         llm = HuggingFacePipeline(pipeline=generate_text)
         return llm
 
-    def get_retriever_chain(self, xml = [], 
-                        web = [],
-                        template =
-                            """
-                            You are an helpful AI assistant that knows everything about the story in the documents.
-                            You need to retrieve the most relevant document based on the following chat:
-
-                            CHAT:
-                            {chat_history}
-                            {input}
-                            """):
+    def _build_retriever_chain(self, xml = [], web = []):
         docs = []
         for xml_path in xml:
             docs += parse_xml(xml_path)
-
         docs += fetch_websites(web)
-        
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         story_splitted = text_splitter.split_documents(docs)
 
@@ -227,138 +320,246 @@ class LLM:
             model_name=EMBED_MODEL,
             model_kwargs={"device": "cuda"},
         )
-        
         vectorstore = FAISS.from_documents(story_splitted, embedding)
         retreiver = vectorstore.as_retriever(
             search_type="similarity",
             k=6,
         )
+        story_retriever_prompt = PromptTemplate.from_messages([
+            ("system", "You are an helpful AI assistant that knows everything about the story in the documents.\nYou need to retrieve the most relevant document based on the following chat:"),
+            ("placeholder", "{history}"),
+            ("human", "{input}")
+        ])
 
-        story_retriever_prompt = PromptTemplate.from_template(template)
-
-        retriever_chain = create_history_aware_retriever(
+        retriever_chain =  create_history_aware_retriever(
             llm=self.llm,
             retriever=retreiver,
             prompt = story_retriever_prompt,
         )
         return retriever_chain
     
-    def get_codebook(self, codebook_file):
-        codebook = pd.read_excel(codebook_file)
-        codebook[['Class', 'Term']] = codebook['Term'].str.split(':', expand=True)
-        codebook = codebook[codebook['Class'] == CLASS_IN_CODEBOOK]
-        codebook.drop(columns=['Class'], inplace=True)
-        codebook['Term'] = codebook['Term'].map(lambda x: x.strip())
-        self.classes = codebook['Term'].tolist()
-        print(self.classes)
-        return codebook.to_string(index=False)
+    def _build_chain(self):
+        if self.llm is None:
+            raise Exception('LLM not initialized')
         
-    def clear_memory(self):
-        if self.memory_buffer:
-            self.memory_buffer.clear()
-
-    def get_template(self):
-        if self.codebook is None:
-            raise Exception("Codebook is not initialized")
+        messages = get_messages(
+            use_context= self.use_context,
+            use_history= self.use_history
+        )
         
-        final_template = start.format(codebook=self.codebook)
-
+        template = PromptTemplate.from_messages(messages)
         if self.retriever_chain is not None:
-            final_template += context
-        
-        if self.use_custom_history or self.memory_buffer is not None:
-            final_template += history
-        
-        final_template += end
-
-        return ChatPromptTemplate.from_template(final_template)
-    
-    def get_chain(self):
-        if self.retriever_chain is not None:
-            chain = create_stuff_documents_chain(self.llm, self.get_template())
+            chain = create_stuff_documents_chain(self.llm, template)
         else:
-            chain = self.get_template() | self.llm
-        
+            chain = template | self.llm
         return chain
 
-    def single_predict(self, sentence, chat_history = None):
+    def predict_single(self, sentence, class_to_predict, history = None):
         if self.llm_chain is None:
             raise Exception("Chain is not initialized")
         
         request = {}
         request['input'] = sentence
-        
-        if self.memory_buffer is not None and chat_history is None:
-            history = self.memory_buffer.load_memory_variables({})
-            request['chat_history'] = history['chat_history']
+        request['codebook'] = self.codebook.format_codebook(class_to_predict)
 
-        if self.use_custom_history:
-            if chat_history is None:
-                request['chat_history'] = ''
+        if history is None:
+            if self.memory_buffer is None:    
+                request['history'] = ''
             else:
-                request['chat_history'] = chat_history
+                history = self.memory_buffer.load_memory_variables({})
+                request['history'] = history['history']
+        else:        
+            request['history'] = history
         
         if self.retriever_chain is not None:
             docs = self.retriever_chain.invoke(request)
             request['context'] = docs
         
         response = self.llm_chain.invoke(request)
-
-        answer = find_first(response, self.classes)
+        answer = find_first(response, self.codebook.get_classes(class_to_predict))
 
         if self.memory_buffer is not None:
             self.memory_buffer.save_context(inputs={'input': sentence}, outputs={'answer': answer})
         
         return answer
 
-    def predict_batch(self, dataset):
-        if self.llm_chain is None:
-            raise Exception("Chain is not initialized")
-        
-        if self.use_custom_history:
-            requests = dataset.map(lambda x: {'input': x['chat'], 'chat_history': x['chat_history']})
-        else:
-            requests = dataset.map(lambda x: {'input': x['chat']})
+    def format_requests(self, data, class_to_predict):
 
+        formatted_codebook = self.codebook.format_codebook(class_to_predict)
+        if self.use_history:
+            requests = data.apply(lambda x: {'input': x[self.text_field], 'codebook': formatted_codebook, 'history': [("human", chat) for chat in x[self.history_field].split('\n')] if not pd.isna(x[self.history_field]) else []}, axis=1).to_list()
+        else:
+            requests = data.apply(lambda x: {'input': x[self.text_field], 'codebook': formatted_codebook}, axis=1).to_list()
+        
         if self.retriever_chain is not None:
             list_docs = self.retriever_chain.batch(requests)
             for i in range(len(requests)):
                 requests[i]['context'] = list_docs[i]
         
+        return requests
+
+    def predict_batch(self, data, class_to_predict):
+        if self.llm_chain is None:
+            raise Exception("Chain is not initialized")
+        
+        requests = self.format_requests(data, class_to_predict)
+        
         responses = self.llm_chain.batch(requests)
+
+        classes = self.codebook.get_classes(class_to_predict)
 
         answers = []
         for response in responses:
-            print(response)
-            answer = find_first(response, self.classes)
-            if answer is None:
-                answer = 'None'
+            answer = find_first(response, classes)
+            print('Pred: ', response)
+            print('Class: ', answer)
             answers.append(answer)
 
         return answers
 
-my_llm_classifier = LLM(codebook_file = './data/codebook.xlsx',
+    def preprocess_dataset(self, dataset_csv_file):
+        data = pd.read_csv(dataset_csv_file)
+        
+        if len(self.combine_fields) > 0:
+            data[self.text_field] = data[self.combine_fields].apply(lambda x: self.separator.join(x.dropna().astype(str)), axis=1)
+
+        history = []
+        for i in range(len(data)):
+            if i >= 1 and not data.iloc[i][self.unique_keys_for_conversation].equals(data.iloc[i-1][self.unique_keys_for_conversation]):
+                history = []
+
+            data.at[i, self.history_field] = '\n'.join(history) if history else pd.NA
+
+            history.append(data.iloc[i][self.text_field])
+            if len(history) > self.window_size:
+                history.pop(0)
+
+        train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
+
+        return train_data, test_data
+
+    def get_trainable_dataset(self, data, class_to_predict):
+        requests = self.format_requests(data, class_to_predict)
+        messages = get_messages(
+            use_context= self.use_context,
+            use_history= self.use_history
+        )
+        prompt_template = ChatPromptTemplate.from_messages(messages)
+        prompts = prompt_template.batch(list(requests))
+        prompts = list(map(lambda x: x.to_string(), prompts))
+
+        labels = data[class_to_predict]
+        dataset_dict = DatasetDict({
+            'train': Dataset.from_dict({'text': prompts, 'label': labels})
+        })
+
+        # train, validation and test split
+        train_test_dataset = dataset_dict['train'].train_test_split(test_size=0.2, seed=42)
+
+        dataset_dict['train'] = train_test_dataset['train']
+        dataset_dict['validation'] = train_test_dataset['test']
+        return dataset_dict
+
+    def train(self, class_to_predict):
+        if self.train_data is None:
+            raise Exception("No dataset found, please add dataset while initializing.")
+
+        dataset = self.get_trainable_dataset(self.train_data, class_to_predict)
+
+        classes = self.codebook.get_classes(class_to_predict)
+
+        peft_config = LoraConfig(
+            lora_alpha=32,
+            lora_dropout=0.1,
+            r=16,
+            bias="none",
+            task_type="CAUSAL_LM"
+        )
+
+        training_arguments = TrainingArguments(
+            output_dir="./checkpoints/",
+            per_device_train_batch_size=8,
+            per_device_eval_batch_size=8,
+            gradient_accumulation_steps=1,
+            optim="paged_adamw_32bit",
+            save_steps=50,
+            logging_steps=10,
+            learning_rate=2e-4,
+            fp16=True,
+            max_grad_norm=0.3,
+            warmup_ratio=0.3,
+            lr_scheduler_type="constant",
+            report_to="none"
+        )
+
+        trainer = SFTTrainer(
+            model=self.model,
+            tokenizer= self.tokenizer,
+            train_dataset=dataset['train'],
+            eval_dataset=dataset['validation'],
+            peft_config=peft_config,
+            max_seq_length=2024,
+            args=training_arguments,
+            dataset_text_field='text',
+            compute_metrics = lambda pred: compute_metrics(pred, classes=classes)
+        )
+
+        trainer.train()
+
+        trainer.save_model(f'./adapters/{class_to_predict}')
+
+    def add_adapter(self, config):
+        self.model = get_peft_model(self.model, config)
+
+        self.llm = self._build_llm()
+        self.chain = self._build_chain()
+
+    def test(self, class_to_predict):
+        y_test = self.test_data[class_to_predict]
+        y_pred = self.predict_batch(self.test_data, class_to_predict)
+        
+        print('Accuracy:', accuracy_score(y_test, y_pred))
+        print('Precision:', precision_score(y_test, y_pred, average='weighted', zero_division=0))
+        print('Recall:', recall_score(y_test, y_pred, average='weighted', zero_division=0))
+        print('F1:', f1_score(y_test, y_pred, average='weighted', zero_division=0))
+
+        print(classification_report(y_test, y_pred, zero_division=0))
+
+codebook_file = './data/codebook.xlsx'
+codebook = Codebook(codebook_file)
+
+# Initialize the model
+my_llm_classifier = LLM(
+                        ### codebook
+                        codebook = codebook,
+
+                        ### retriever
                         use_xmls = [],#['./data/LadyOrThetigerIMapBook.xml'],
                         use_websites = [],
-                        use_custom_history = True,
-                        use_buffer = False
+
+                        ### history
+                        use_history = True,
+                        use_buffer = False,
+
+                        ### load model
+                        quantize=False,
+
+                        ### DATASET ARGS
+                        dataset_csv_file= './data/cleaned_data.csv',
+                        window_size= 3,
+                        text_field= 'message',
+                        combine_fields = [],
+                        separator = ': ',
+                        unique_keys_for_conversation = ['book_id', 'bookclub', 'course'],
+                        
                         )
 
-# Test the model
-# Retrive the dataset to test and train the model
-data = load_dataset('csv', data_files='data/cleaned_data.csv')
+class_to_predict = 'Discussion'
 
-# split into train, validation and test
-data = data['train'].train_test_split(test_size=0.2, seed=42)
-X_train, X_test = data['train'], data['test']
-y_train, y_test = X_train[CLASS], X_test[CLASS]
+lora_config = LoraConfig.from_pretrained(f'./adapters/{class_to_predict}')
 
-y_pred = my_llm_classifier.predict_batch(X_test)
+my_llm_classifier.add_adapter(lora_config)
 
-print('Accuracy:', accuracy_score(y_test, y_pred))
-print('Precision:', precision_score(y_test, y_pred, average='weighted', zero_division=0))
-print('Recall:', recall_score(y_test, y_pred, average='weighted', zero_division=0))
-print('F1:', f1_score(y_test, y_pred, average='weighted', zero_division=0))
+#my_llm_classifier.train(class_to_predict)
 
-print(classification_report(y_test, y_pred, zero_division=0))
-    
+my_llm_classifier.test(class_to_predict)
