@@ -26,7 +26,7 @@ from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.docstore.document import Document
 
-from peft import LoraConfig
+from peft import LoraConfig, PeftConfig, get_peft_model
 
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 
@@ -89,8 +89,11 @@ def find_first(sentence, items):
         item = 'None'
     return item
 
-def compute_metrics(responses, labels, classes = None):
-    preds = list(map(lambda response: find_first(response, classes), responses))
+def compute_metrics(pred, classes = None):
+    labels = pred.label_ids
+    responses = pred.predictions
+
+    preds = [find_first(response) for response in responses]
     
     # Calculate accuracy
     accuracy = accuracy_score(labels, preds)
@@ -111,23 +114,32 @@ def get_messages(use_history,
                  use_context,
                      ):
     messages = []
-    ### Initial
-    messages.append(("system", "You are a helpful AI classifier that knows everything about discourse analysis and can help children to classify their discussion.\n"))
-    
-    ### Codebook
-    messages.append(("system", "Classify the new sentence into one of the classes from the codebook:\n### CODEBOOK:\n{codebook}\n###\nIf you failed to classify the sentence, return None instead of caming up with a solution.\n"))
+    ## Initial
+    messages.append(("system", "You are a helpful AI classifier that knows everything about discourse analysis and can help children to classify their discussion.\n\
+                     Classify the new sentence into one of the classes from the codebook:\n\
+                     CODEBOOK:\n\
+                     {codebook}\n\
+                     ###\n\
+                     If you failed to classify the sentence, return None instead of caming up with a solution.\n"))
 
     ### Context
     if use_context:
-        messages.append(("assistant", "Here are some relevant documents that might help you to classify the sentence:\n'''\n{context}\n'''\n"))
+        messages.append(("assistant", "Here are some relevant documents that might help you to classify the sentence:\n\
+                         '''\n\
+                         {context}\n\
+                         '''\n\
+                         "))
     
     ### History
     if use_history:
+        messages.append(("system", "You can use the following conversation history if is relevant:"))
         messages.append(("placeholder", "{history}"))
     
     ### Final input
-    messages.append(("system", "Classify the sentence into one class of the codebook."))
+    messages.append(("system", "Classify the following sentence into one class of the codebook."))
     messages.append(("human", "{input}"))
+    #messages.append(("user", "answer:"))
+
     return messages
 
 class Codebook:
@@ -142,12 +154,15 @@ class Codebook:
 
     def format_row_codebook(self, row):
         class_message = f"Class: '''{row['Term']}'''\n"
+
         if not pd.isna(row['Definition']):
             definition = " ".join(row['Definition'].split('\n'))
             class_message += f"Definition: '''{definition}'''\n"
+
         if not pd.isna(row['Example']):
             example = " ".join(row['Example'].split('\n'))
             class_message += f"Example: '''{example}'''\n"
+
         class_message += "\n"
         return class_message
 
@@ -259,7 +274,7 @@ class LLM:
                 device_map="auto",
                 token=ACCESS_TOKEN
             )
-        model.config.use_cache = False
+        model.config.use_cache = True
         return model
 
     def _build_tokenizer(self):
@@ -269,7 +284,7 @@ class LLM:
             token=ACCESS_TOKEN
         )
         tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = "right"
+        tokenizer.padding_side = 'right'
         return tokenizer
 
     def _build_llm(self):
@@ -288,6 +303,7 @@ class LLM:
             #temperature=0.0,
             max_new_tokens=500,
             repetition_penalty=1.5,
+            batch_size=2,
         )
         llm = HuggingFacePipeline(pipeline=generate_text)
         return llm
@@ -331,7 +347,7 @@ class LLM:
             use_history= self.use_history
         )
         
-        template = ChatPromptTemplate.from_messages(messages)
+        template = PromptTemplate.from_messages(messages)
         if self.retriever_chain is not None:
             chain = create_stuff_documents_chain(self.llm, template)
         else:
@@ -404,7 +420,8 @@ class LLM:
     def preprocess_dataset(self, dataset_csv_file):
         data = pd.read_csv(dataset_csv_file)
         
-        data[self.text_field] = data[self.combine_fields].apply(lambda x: self.separator.join(x.dropna().astype(str)), axis=1)
+        if len(self.combine_fields) > 0:
+            data[self.text_field] = data[self.combine_fields].apply(lambda x: self.separator.join(x.dropna().astype(str)), axis=1)
 
         history = []
         for i in range(len(data)):
@@ -431,8 +448,9 @@ class LLM:
         prompts = prompt_template.batch(list(requests))
         prompts = list(map(lambda x: x.to_string(), prompts))
 
+        labels = data[class_to_predict]
         dataset_dict = DatasetDict({
-            'train': Dataset.from_dict({'text': prompts, 'label': data[class_to_predict]})
+            'train': Dataset.from_dict({'text': prompts, 'label': labels})
         })
 
         # train, validation and test split
@@ -448,6 +466,8 @@ class LLM:
 
         dataset = self.get_trainable_dataset(self.train_data, class_to_predict)
 
+        classes = self.codebook.get_classes(class_to_predict)
+
         peft_config = LoraConfig(
             lora_alpha=32,
             lora_dropout=0.1,
@@ -457,16 +477,16 @@ class LLM:
         )
 
         training_arguments = TrainingArguments(
-            output_dir="./results",
-            per_device_train_batch_size=4,
+            output_dir="./checkpoints/",
+            per_device_train_batch_size=8,
+            per_device_eval_batch_size=8,
             gradient_accumulation_steps=1,
             optim="paged_adamw_32bit",
-            save_steps=100,
+            save_steps=50,
             logging_steps=10,
             learning_rate=2e-4,
             fp16=True,
             max_grad_norm=0.3,
-            max_steps=500,
             warmup_ratio=0.3,
             lr_scheduler_type="constant",
             report_to="none"
@@ -474,14 +494,25 @@ class LLM:
 
         trainer = SFTTrainer(
             model=self.model,
+            tokenizer= self.tokenizer,
             train_dataset=dataset['train'],
             eval_dataset=dataset['validation'],
             peft_config=peft_config,
             max_seq_length=2024,
             args=training_arguments,
+            dataset_text_field='text',
+            compute_metrics = lambda pred: compute_metrics(pred, classes=classes)
         )
 
         trainer.train()
+
+        trainer.save_model(f'./adapters/{class_to_predict}')
+
+    def add_adapter(self, config):
+        self.model = get_peft_model(self.model, config)
+
+        self.llm = self._build_llm()
+        self.chain = self._build_chain()
 
     def test(self, class_to_predict):
         y_test = self.test_data[class_to_predict]
@@ -524,4 +555,11 @@ my_llm_classifier = LLM(
                         )
 
 class_to_predict = 'Discussion'
+
+lora_config = LoraConfig.from_pretrained(f'./adapters/{class_to_predict}')
+
+my_llm_classifier.add_adapter(lora_config)
+
+#my_llm_classifier.train(class_to_predict)
+
 my_llm_classifier.test(class_to_predict)
