@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.docstore.document import Document
 
 ####### MODEL CONFIGURATION #######
-with open("./tokens/hugging_face_token.txt", "r") as file:
+with open("./src/tokens/hugging_face_token.txt", "r") as file:
     ACCESS_TOKEN = file.read().strip()
 
 models = {
@@ -37,8 +37,8 @@ LLM_MODEL = models["mistral-7B"]
 EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 ####### FILE CONFIGURATION #######
-CODEBOOK_FILE = "./data/codebook.xlsx"
-DATASET_FILE = "./data/cleaned_data.csv"
+CODEBOOK_FILE = "./src/data/codebook.xlsx"
+DATASET_FILE = "./src/data/cleaned_data.csv"
 
 ######### PROMPT CONFIGURATION ########
 
