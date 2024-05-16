@@ -264,13 +264,13 @@ def combine_docs(docs):
 if __name__ == '__main__':
 
     use_history = True
-    use_context = True
-    quantize = False
+    use_context = False
+    quantize = True
 
     # get codebook
     codebook = get_codebook()
     classes = get_classes(codebook)
-    class_to_predict = 'Discussion'
+    class_to_predict = 'Uptake'
     
     print(f'Processing class: {class_to_predict}')
     # get formatted codebook and classes to predict
