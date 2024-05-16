@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.docstore.document import Document
 
 ####### MODEL CONFIGURATION #######
-with open("./src/tokens/hugging_face_token.txt", "r") as file:
+with open("./tokens/hugging_face_token.txt", "r") as file:
     ACCESS_TOKEN = file.read().strip()
 
 models = {
@@ -37,8 +37,8 @@ LLM_MODEL = models["mistral-7B"]
 EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 ####### FILE CONFIGURATION #######
-CODEBOOK_FILE = "./src/data/codebook.xlsx"
-DATASET_FILE = "./src/data/cleaned_data.csv"
+CODEBOOK_FILE = "./data/codebook.xlsx"
+DATASET_FILE = "./data/cleaned_data.csv"
 
 ######### PROMPT CONFIGURATION ########
 
@@ -263,92 +263,92 @@ def combine_docs(docs):
 
 if __name__ == '__main__':
 
-    use_history = True
-    use_context = True
+    use_history = False
+    use_context = False
     quantize = False
 
     # get codebook
     codebook = get_codebook()
     classes = get_classes(codebook)
-    class_to_predict = 'Discussion'
+    for class_to_predict in classes:
     
-    print(f'Processing class: {class_to_predict}')
-    # get formatted codebook and classes to predict
-    formatted_codebook = get_formatted_codebook(codebook, class_to_predict)
-    classes_to_predict = get_classes_to_predict(codebook, class_to_predict)
+        print(f'Processing class: {class_to_predict}')
+        # get formatted codebook and classes to predict
+        formatted_codebook = get_formatted_codebook(codebook, class_to_predict)
+        classes_to_predict = get_classes_to_predict(codebook, class_to_predict)
 
-    # Initial prompt
-    final_prompt = INITIAL_PROMPT.format(classes = ', '.join(classes_to_predict))
+        # Initial prompt
+        final_prompt = INITIAL_PROMPT.format(classes = ', '.join(classes_to_predict))
 
-    # Input prompt
-    final_prompt += INPUT
+        # Input prompt
+        final_prompt += INPUT
 
-    # Codebook prompt
-    final_prompt += CODEBOOK_PROMPT.format(codebook = formatted_codebook)
+        # Codebook prompt
+        final_prompt += CODEBOOK_PROMPT.format(codebook = formatted_codebook)
 
-    # History prompt
-    if use_history:
-        final_prompt += HISTORY
+        # History prompt
+        if use_history:
+            final_prompt += HISTORY
 
-    # Context prompt
-    if use_context:
-        retriever = Retriever(xmls = ['./data/LadyOrThetigerIMapBook.xml'], 
-                            quantize = quantize,
-                            documents_to_retrieve = 3
-                            )
-        final_prompt += CONTEXT
-        
-    # Data processing
-    text_field = 'message'
-    history_field = 'history'
+        # Context prompt
+        if use_context:
+            retriever = Retriever(xmls = ['./data/LadyOrThetigerIMapBook.xml'], 
+                                quantize = quantize,
+                                documents_to_retrieve = 3
+                                )
+            final_prompt += CONTEXT
+            
+        # Data processing
+        text_field = 'message'
+        history_field = 'history'
 
-    data = preprocess_data(
-        combine_fields = [],
-        separator = ': ',
-        text_field = text_field,
-        history_field = history_field,
-        unique_keys_for_conversation =  ['book_id', 'bookclub', 'course'],
-        window_size = 3,
-    )
+        data = preprocess_data(
+            combine_fields = [],
+            separator = ': ',
+            text_field = text_field,
+            history_field = history_field,
+            unique_keys_for_conversation =  ['book_id', 'bookclub', 'course'],
+            window_size = 3,
+        )
 
-    # Prompt requests with input and w/wo history
-    if use_history:
-        prompt_requests = data.apply(lambda x: {'input': x[text_field],\
-                                                'chat_history': [("human", chat) for chat in x[history_field].split('\n')] if not pd.isna(x[history_field]) else [],\
-                                                'history': x[history_field]}, axis=1).to_list()
-    else:
-        prompt_requests = data.apply(lambda x: {'input': x[text_field]}, axis=1).to_list()
+        # Prompt requests with input and w/wo history
+        if use_history:
+            prompt_requests = data.apply(lambda x: {'input': x[text_field],\
+                                                    'chat_history': [("human", chat) for chat in x[history_field].split('\n')] if not pd.isna(x[history_field]) else [],\
+                                                    'history': x[history_field]}, axis=1).to_list()
+        else:
+            prompt_requests = data.apply(lambda x: {'input': x[text_field]}, axis=1).to_list()
 
-    if use_context:
-        # Retrieval
-        responses = retriever.batch(prompt_requests)
+        if use_context:
+            # Retrieval
+            responses = retriever.batch(prompt_requests)
 
-        # Add the retrieved context to the requests
-        for i in range(len(prompt_requests)):
-            prompt_requests[i]['context'] = combine_docs(responses[i])
+            # Add the retrieved context to the requests
+            for i in range(len(prompt_requests)):
+                prompt_requests[i]['context'] = combine_docs(responses[i])
 
-    # FINAL PROMPT
-    final_prompts = [final_prompt.format(**request) for request in prompt_requests]
+        # FINAL PROMPT
+        final_prompts = [final_prompt.format(**request) for request in prompt_requests]
 
-    print('Final prompt:')
-    print(final_prompts[1])
+        print('Final prompt:')
+        print(final_prompts[1])
 
-    # remove \n from the final prompts
-    final_prompts = [prompt.replace('\n', ' ') for prompt in final_prompts]
+        # remove \n from the final prompts
+        final_prompts = [prompt.replace('\n', ' ') for prompt in final_prompts]
 
-    # COMBINE PROMPTS WITH FINAL CLASSES IN PANDAS
-    final_dataset = Dataset.from_dict({
-        'prompt': final_prompts,
-        'label': data[class_to_predict]
-    })
+        # COMBINE PROMPTS WITH FINAL CLASSES IN PANDAS
+        final_dataset = Dataset.from_dict({
+            'prompt': final_prompts,
+            'label': data[class_to_predict]
+        })
 
-    # Split into train and test
-    final_dataset = final_dataset.train_test_split(test_size=0.2, seed=42)
-    print('Final dataset:', final_dataset)
+        # Split into train and test
+        final_dataset = final_dataset.train_test_split(test_size=0.2, seed=42)
+        print('Final dataset:', final_dataset)
 
-    # Save final data
-    final_path = f'./preprocessed/dataset_{class_to_predict}'
-    final_path += '_with_history' if use_history else ''
-    final_path += '_with_context' if use_context else ''
+        # Save final data
+        final_path = f'./preprocessed/dataset_{class_to_predict}'
+        final_path += '_with_history' if use_history else ''
+        final_path += '_with_context' if use_context else ''
 
-    final_dataset.save_to_disk(final_path)
+        final_dataset.save_to_disk(final_path)
