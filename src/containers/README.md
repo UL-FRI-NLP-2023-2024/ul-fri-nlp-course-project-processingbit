@@ -9,3 +9,6 @@ and then use run_slurm.sh with:
 ```bash
 sbatch run_slurm.sh
 ```
+
+%environment
+    export PATH=$HOME/.local/bin:$PATH
