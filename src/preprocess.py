@@ -193,28 +193,28 @@ class Retriever:
 
 def get_codebook():
     codebook = pd.read_excel(CODEBOOK_FILE)
-    codebook[['Class', 'Term']] = codebook['Term'].str.split(':', expand=True)
-    codebook['Term'] = codebook['Term'].map(lambda x: x.strip())
+    codebook[['Class', 'Term']] = codebook['Term'].str.split(":", expand=True)
+    codebook['Term'] = codebook['Term'].map(lambda x: str(x.strip()))
     return codebook
 
 def get_formatted_row(row):
     ### Add class name
-    message_row = f"Class: '''{row['Term']}'''\n"
+    message_row = f"### Class: {row['Term']} ###\n"
 
     ### Add definition
     if not pd.isna(row['Definition']):
         definition = " ".join(row['Definition'].split('\n'))
-        message_row += f"Definition: '''{definition}'''\n"
+        message_row += f"### Definition: {definition} ###\n"
 
     ### Add example
     if not pd.isna(row['Example']):
         example = " ".join(row['Example'].split('\n'))
-        message_row += f"Example: '''{example}'''\n"
+        message_row += f"### Example: {example} ###\n"
 
     return message_row
 
 def get_formatted_codebook(codebook, class_to_predict):
-    codebook = codebook[codebook['Class'] == class_to_predict]
+    codebook = codebook[codebook['Class'] == class_to_predict].copy()
     codebook.drop(columns=['Class'], inplace=True)
     formatted_codebook = codebook.apply(get_formatted_row, axis=1)
     formatted_codebook = "\n".join(formatted_codebook)
@@ -228,7 +228,6 @@ def get_classes(codebook):
 
 
 ###### DATA PROCESSING FUNCTIONS ######
-
 def preprocess_data(
         combine_fields = [],
         separator = ': ',
