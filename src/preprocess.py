@@ -327,17 +327,14 @@ if __name__ == '__main__':
     # FINAL PROMPT
     final_prompts = [final_prompt.format(**request) for request in prompt_requests]
 
-    print('Final prompt:')
-    print(final_prompts[1])
-
     # remove \n from the final prompts
     final_prompts = [prompt.replace("\n", " ") for prompt in final_prompts]
 
     # COMBINE PROMPTS WITH FINAL CLASSES IN PANDAS
     labels = [str(label) for label in data[class_to_predict]]
     final_dataset = Dataset.from_dict({
-        'text': final_prompts,
-        'labels': labels
+        'text': np.array(final_prompts),
+        'labels': np.array(labels)
     })
 
     # Split into train and test
