@@ -19,7 +19,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.docstore.document import Document
 
 ####### MODEL CONFIGURATION #######
-with open("./src/tokens/hugging_face_token.txt", "r") as file:
+with open("./tokens/hugging_face_token.txt", "r") as file:
     ACCESS_TOKEN = file.read().strip()
 
 models = {
@@ -37,8 +37,8 @@ LLM_MODEL = models["mistral-7B"]
 EMBED_MODEL = "sentence-transformers/all-mpnet-base-v2"
 
 ####### FILE CONFIGURATION #######
-CODEBOOK_FILE = "./src/data/codebook.xlsx"
-DATASET_FILE = "./src/data/cleaned_data.csv"
+CODEBOOK_FILE = "./data/codebook.xlsx"
+DATASET_FILE = "./data/cleaned_data.csv"
 
 ######### PROMPT CONFIGURATION ########
 
@@ -68,9 +68,6 @@ CONTEXT = """Here are some relevant documents that might help you to classify th
 {context}
 ###
 """
-
-
-
 
 ######### PARSING FUNCTIONS ########
 
@@ -264,7 +261,7 @@ def combine_docs(docs):
 if __name__ == '__main__':
 
     use_history = True
-    use_context = False
+    use_context = True
     quantize = True
 
     # get codebook
@@ -334,12 +331,13 @@ if __name__ == '__main__':
     print(final_prompts[1])
 
     # remove \n from the final prompts
-    final_prompts = [prompt.replace('\n', ' ') for prompt in final_prompts]
+    final_prompts = [prompt.replace("\n", " ") for prompt in final_prompts]
 
     # COMBINE PROMPTS WITH FINAL CLASSES IN PANDAS
+    labels = [str(label) for label in data[class_to_predict]]
     final_dataset = Dataset.from_dict({
-        'prompt': final_prompts,
-        'label': data[class_to_predict]
+        'text': final_prompts,
+        'labels': labels
     })
 
     # Split into train and test
