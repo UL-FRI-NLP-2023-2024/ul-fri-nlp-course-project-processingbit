@@ -27,10 +27,12 @@ from langchain_community.vectorstores.faiss import FAISS
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.docstore.document import Document
+from datasets import load_from_disk
 
 from peft import LoraConfig, PeftConfig, get_peft_model
+import pyarrow.parquet as pq
 
-from trl import SFTTrainer 
+from transformers import Trainer 
 import os
 
 print(os.getcwd())
@@ -53,37 +55,13 @@ models = {
 LLM_MODEL = models["llama-3-8"]
 print(f'Model: {LLM_MODEL}')
 
-class_to_predict = 'Discussion'
-quantize = False
-
-dataset_csv_file =  './data/cleaned_data.csv'
-window_size = 3
-text_field = 'prompt'
-
-use_adapters = False
-
-def split_data(data):
-    train_data, test_data = train_test_split(data, test_size=0.2, random_state=42)
-
-    # Training dataset
-    labels = train_data[class_to_predict]
-    prompts = train_data[text_field]
-
-    train_prompts = DatasetDict({
-        'train': Dataset.from_dict({'text': prompts, 'label': labels})
-    })
-
-    # train and validation split
-    train_test_dataset = train_prompts['train'].train_test_split(test_size=0.2, seed=42)
-
-    train_prompts['train'] = train_test_dataset['train']
-    train_prompts['validation'] = train_test_dataset['test']
-
-    return train_prompts['train'], train_prompts['validation'], test_data
+quantize = True
+dataset_file = './preprocessed/dataset_Discussion_with_history'
+text_field = 'text'
 
 ############# DATASET FOR TRAINING AND TEST ################
-data = pd.read_csv(dataset_csv_file)
-train_prompts, val_prompts, test_data = split_data(data)
+data_with_test = load_from_disk(dataset_file)
+data = data_with_test['train'].train_test_split(test_size=0.2, seed=42)
 
 ####### MODEL ##################
 # INITIALIZE MODEL
@@ -97,13 +75,14 @@ bnb_config = BitsAndBytesConfig(
 )
 
 # Fakes fix it 
-classes_to_predict = train_prompts['train']['label'].unique()
+classes_to_predict = np.unique(data['train']['labels'])
 id2label = {i: label for i, label in enumerate(classes_to_predict)}
 label2id = {label: i for i, label in enumerate(classes_to_predict)}
 
 model_config = AutoConfig.from_pretrained(
     pretrained_model_name_or_path=LLM_MODEL,
     token=ACCESS_TOKEN,
+    num_labels = len(classes_to_predict),
 )
 
 model = AutoModelForSequenceClassification.from_pretrained(
@@ -112,13 +91,13 @@ model = AutoModelForSequenceClassification.from_pretrained(
     quantization_config=bnb_config if quantize else None,
     device_map={'':device_string},
     token=ACCESS_TOKEN,
-    num_labels = len(classes_to_predict),
-    id2label = id2label,
-    label2id = label2id 
+    #id2label = id2label,
+    #label2id = label2id 
 )
 
 model.config.use_cache = False
 
+print("#### GET TOKENIZER #####")
 tokenizer = AutoTokenizer.from_pretrained(
     pretrained_model_name_or_path=LLM_MODEL,
     trust_remote_code=True,
@@ -151,6 +130,7 @@ peft_config = LoraConfig(
     task_type="SEQ_CLS"
 )
 
+print("#### GET PEFT #####")
 model = get_peft_model(model, peft_config)
 
 training_arguments = TrainingArguments(
@@ -163,28 +143,60 @@ training_arguments = TrainingArguments(
     num_train_epochs=10,
     save_steps=500,
     learning_rate=1e-4,
+    #label_names = ['label'],
     warmup_steps=100,
     load_best_model_at_end=True,
     evaluation_strategy="steps",
 )
 
+print("#### TOKENIZE DATA #####")
+max_length = 2048
+def preprocess_function(examples):
+    global text_field
+    if isinstance(text_field, str):
+        d = examples[text_field]
+    else:
+        d = examples[text_field[0]]
+        for n in text_field[1:]:
+            nd = examples[n]
+            assert len(d) == len(nd)
+            for i, t in enumerate(nd):
+                d[i] += '\n' + t
+
+    return tokenizer(d, padding='longest', max_length=max_length, truncation=True)
+
+
+tokenized_data = data.map(preprocess_function, batched=True)
+#tokenized_data = tokenized_data.remove_columns(data["train"].column_names)
+#tokenized_data = data
+
+#print(tokenized_data['train'][0])
+def encode_labels(example):
+    example['labels'] = label2id[example['labels']]
+    return example
+
+tokenized_data = tokenized_data.map(encode_labels)
+
+
+#tokenized_data.set_format(type='numpy', columns=['labels'])
+
 collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
-trainer = SFTTrainer(
+trainer = Trainer(
     model = model,
     tokenizer = tokenizer,
-    train_dataset = train_prompts,
-    eval_dataset = val_prompts,
-    peft_config = peft_config,
+    train_dataset = tokenized_data['train'],
+    eval_dataset = tokenized_data['test'],
     data_collator=collator,
-    max_seq_length=2048,
     args=training_arguments,
-    dataset_text_field='text',
-    compute_metrics = compute_metrics()
+    compute_metrics = compute_metrics
 )
 
+
+print("#### TRAIN ####")
 trainer.train()
 
+print("#### SAVE ####")
 # Save the model
 model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
 model_to_save.save_pretrained("clf")
