@@ -7,6 +7,7 @@ import re
 import pandas as pd
 import numpy as np
 from datasets import DatasetDict, load_dataset, Dataset
+from tqdm import tqdm
 
 #from IPython.display import print
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -100,7 +101,7 @@ def fetch_websites(sites):
     return docs
 
 class Retriever:
-    def __init__(self, xmls = [], websites = [], quantize = False, documents_to_retrieve = 3):
+    def __init__(self, xmls = [], websites = [], quantize = True, documents_to_retrieve = 1):
         # Loading documents
         docs = []
         for xml_path in xmls:
@@ -108,7 +109,7 @@ class Retriever:
         docs += fetch_websites(websites)
 
         # Splitting documents
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=20)
         story_splitted = text_splitter.split_documents(docs)
 
         # Creating retriever
@@ -141,7 +142,7 @@ class Retriever:
             device_map= "auto",
             token=ACCESS_TOKEN
         )
-        model.config.use_cache = False
+        model.config.use_cache = True
         model.eval()
 
         # Tokenizer
@@ -151,7 +152,7 @@ class Retriever:
             token=ACCESS_TOKEN
         )
         tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = 'right'
+        tokenizer.padding_side = "right"
 
         # LLM
         llm = HuggingFacePipeline(pipeline=pipeline(
@@ -159,10 +160,10 @@ class Retriever:
             model=model,
             tokenizer=tokenizer,
             return_full_text = False,
-            temperature = 0.2,
+            #temperature = 0.2,
             max_new_tokens = 100,
             repetition_penalty = 1.5,
-            do_sample=True,
+            #batch_size = 4,
         ))
 
         # Retriever prompt
@@ -260,14 +261,14 @@ def combine_docs(docs):
 
 if __name__ == '__main__':
 
-    use_history = True
+    use_history = False
     use_context = False
     quantize = True
 
     # get codebook
     codebook = get_codebook()
     classes = get_classes(codebook)
-    class_to_predict = 'Discussion'
+    class_to_predict = 'Uptake'
     
     print(f'Processing class: {class_to_predict}')
     # get formatted codebook and classes to predict
@@ -291,7 +292,7 @@ if __name__ == '__main__':
     if use_context:
         retriever = Retriever(xmls = ['./data/LadyOrThetigerIMapBook.xml'], 
                             quantize = quantize,
-                            documents_to_retrieve = 3
+                            documents_to_retrieve = 1
                             )
         final_prompt += CONTEXT
         
@@ -305,7 +306,7 @@ if __name__ == '__main__':
         text_field = text_field,
         history_field = history_field,
         unique_keys_for_conversation =  ['book_id', 'bookclub', 'course'],
-        window_size = 3,
+        window_size = 6,
     )
 
     # Prompt requests with input and w/wo history
@@ -318,11 +319,13 @@ if __name__ == '__main__':
 
     if use_context:
         # Retrieval
-        responses = retriever.batch(prompt_requests)
+        print('Retrieving context...')
+        for prompt in tqdm(prompt_requests):
+            docs = retriever.invoke(prompt)
+            print('Retrieved context:', docs)
+            print('number of docs:', len(docs))
 
-        # Add the retrieved context to the requests
-        for i in range(len(prompt_requests)):
-            prompt_requests[i]['context'] = combine_docs(responses[i])
+            prompt['context'] = combine_docs(docs) if len(docs) > 0 else 'None'
 
     # FINAL PROMPT
     final_prompts = [final_prompt.format(**request) for request in prompt_requests]
@@ -332,9 +335,12 @@ if __name__ == '__main__':
 
     # COMBINE PROMPTS WITH FINAL CLASSES IN PANDAS
     labels = [str(label) for label in data[class_to_predict]]
+    messages = data[text_field]
+
     final_dataset = Dataset.from_dict({
-        'text': np.array(final_prompts),
-        'labels': np.array(labels)
+        'message' : messages,
+        'text': final_prompts,
+        'labels': labels
     })
 
     # Split into train and test

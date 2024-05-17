@@ -8,6 +8,7 @@ From: nvidia/cuda:12.4.1-devel-ubuntu22.04
     pip3 install numpy
     pip3 install pandas
     pip3 install scikit-learn 
+    pip3 install tqdm
 
     pip3 install trl transformers 
     pip3 install accelerate 
