@@ -87,10 +87,20 @@ def find_first(sentence, items):
         item = 'None'
     return item
 
-def load_data(class_to_predict):
-    data = []
+def get_extension(class_to_predict, use_history, use_context):
+    extension = f'_{class_to_predict}'
+    extension += '_with_history' if use_history else ''
+    extension += '_with_context' if use_context else ''
+    return extension
+
+def load_data(class_to_predict, use_history, use_context):
+    dataset = load_from_disk(f"./preprocessed/dataset_{get_extension(class_to_predict, use_history, use_context)}")
+    data = pd.DataFrame(dataset['test'])
+
+
     for file in os.listdir(PATH_DIR):
-        if file.startswith(f"{class_to_predict}_"):
-            data.append(load_from_disk(PATH_DIR + file))
+        
+        
+            
 
     return data
