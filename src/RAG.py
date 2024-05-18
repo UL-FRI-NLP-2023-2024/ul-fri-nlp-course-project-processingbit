@@ -83,7 +83,7 @@ class Retriever:
         docs += fetch_websites(websites)
 
         # Splitting documents
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=20)
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=30)
         story_splitted = text_splitter.split_documents(docs)
 
         # Creating retriever
@@ -94,7 +94,7 @@ class Retriever:
         vector_store = FAISS.from_documents(story_splitted, embeddings)
         self.retreiver = vector_store.as_retriever(
             search_type="similarity",
-            k = documents_to_retrieve,
+            search_kwargs={'k': documents_to_retrieve}
         )
 
         ### Initializing model, tokenizer and LLM
@@ -151,10 +151,10 @@ class Retriever:
         
     def invoke(self, request):
         query = request['input']
-        if 'chat_history' in request:
+        if 'chat_history' in request and not pd.isna(request['chat_history']):
             chat = self.system_chat
-            chat_history = request['chat_history'] if request['chat_history'] else ''
-            for user_messsage in chat_history.split('\n'):
+            history_str = request['chat_history']
+            for user_messsage in history_str.split('\n'):
                 chat.append({"role": "user", "content": user_messsage})
             chat.append({"role": "user", "content": request['input']})
 
@@ -199,7 +199,7 @@ if __name__ == '__main__':
 
     retriever = Retriever(xmls = ['./data/LadyOrThetigerIMapBook.xml'], 
                             quantize = quantize,
-                            documents_to_retrieve = 1
+                            documents_to_retrieve = 3
                             )
             
     # Data processing
@@ -213,7 +213,7 @@ if __name__ == '__main__':
         history_field = history_field,
         unique_keys_for_conversation =  ['book_id', 'bookclub', 'course'],
         window_size = window_size,
-    )[:2]
+    )
 
     # Prompt requests with input and w/wo history
     if use_history:
@@ -224,14 +224,10 @@ if __name__ == '__main__':
         prompt_requests = data.apply(lambda x: {'input': x[text_field]}, axis=1).to_list()
 
     
-        # Retrieval
-    print('Retrieving context...')
+    # Retrieval
     docs_data = []
     for prompt in tqdm(prompt_requests):
         docs = retriever.invoke(prompt)
-        print('Retrieved context:', docs)
-        print('number of docs:', len(docs))
-
         docs_data.append(docs)
 
     dataset = pd.DataFrame(docs_data)

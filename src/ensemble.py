@@ -55,7 +55,7 @@ models = {
 LLM_MODEL = models["mistral-7B"]
 print(f'Model: {LLM_MODEL}')
 
-PATH_DIR = "./results/"
+PATH_DIR = "./pred_results/"
 
 stemmer = PorterStemmer()
 lemmatizer = nltk.stem.WordNetLemmatizer()
@@ -87,20 +87,54 @@ def find_first(sentence, items):
         item = 'None'
     return item
 
-def get_extension(class_to_predict, use_history, use_context):
-    extension = f'_{class_to_predict}'
-    extension += '_with_history' if use_history else ''
-    extension += '_with_context' if use_context else ''
+def get_extension(class_to_predict, use_history, use_past_labels, use_context):
+    extension = f'_{class_to_predict.lower()}'
+    if use_history or use_past_labels or use_context:
+        extension += '_w'
+        extension += '_history' if use_history else ''
+        extension += '_past-labels' if use_past_labels else ''
+        extension += '_context' if use_context else ''
     return extension
 
-def load_data(class_to_predict, use_history, use_context):
-    dataset = load_from_disk(f"./preprocessed/dataset_{get_extension(class_to_predict, use_history, use_context)}")
+def parse_filename(filename):
+    """
+    Parse the filename to extract the method used and the features encoded in the extension.
+    """
+    # Remove the .npy extension to ease parsing
+    base_name = filename[:-4]
+    
+    # Split the base_name by '_' to separate method_used from the extension
+    parts = base_name.split('_')
+    method_used = parts[0]
+    features = parts[1:]
+    
+    return method_used, features
+
+def match_features(features):
+    """
+    Match the features list with the corresponding boolean flags.
+    """
+    class_to_predict = features[0]  # The first part after method_used is always class_to_predict
+    use_history = 'history' in features
+    use_past_labels = 'past-labels' in features
+    use_context = 'context' in features
+    
+    return class_to_predict, use_history, use_past_labels, use_context
+
+
+def load_data(class_to_predict):
+    dataset = load_from_disk(f"./preprocessed/data_{get_extension(class_to_predict, False, False, False)}")
     data = pd.DataFrame(dataset['test'])
 
-
+    # Loop through each .npy file in the directory
     for file in os.listdir(PATH_DIR):
-        
-        
-            
-
+        if file.endswith(".npy"):
+            method_used, features = parse_filename(file)
+            class_to_predict, use_history, use_past_labels, use_context = match_features(features)
+            if class_to_predict == class_to_predict:
+                name = file[:-4]
+                predictions = np.load(PATH_DIR + file)
+                data[name] = predictions
+    
     return data
+
