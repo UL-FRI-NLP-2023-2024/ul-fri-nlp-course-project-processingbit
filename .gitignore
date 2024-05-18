@@ -4,3 +4,4 @@ src/logs/
 src/checkpoints/
 src/llm_versions/
 *launch.json*
+*saved_clf_adapters*
