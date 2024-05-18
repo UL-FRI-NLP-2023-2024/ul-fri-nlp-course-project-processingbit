@@ -34,7 +34,7 @@ from datasets import load_from_disk
 
 from peft import LoraConfig, PeftConfig, get_peft_model
 
-test_name = "parameter-search"
+test_name = "Input_4096_with_no_context"
 
 print("#### NAME #####")
 print(test_name)
@@ -63,6 +63,8 @@ text_field = 'text'
 ############# DATASET FOR TRAINING AND TEST ################
 data_with_test = load_from_disk(dataset_file)
 data = data_with_test['train'].train_test_split(test_size=0.2, seed=42)
+
+print(data.shape)
 
 ####### MODEL ##################
 # INITIALIZE MODEL
@@ -139,11 +141,11 @@ model.config.pad_token_id = model.config.eos_token_id
 
 training_arguments = TrainingArguments(
     output_dir="./checkpoints/",
-    per_device_train_batch_size=2,
-    per_device_eval_batch_size=2,
+    per_device_train_batch_size=1,
+    per_device_eval_batch_size=1,
     gradient_accumulation_steps=8,
     optim="paged_adamw_32bit",
-    num_train_epochs=10,
+    num_train_epochs=50,
     logging_steps=20,
     save_steps=20,
     learning_rate=1e-4,
@@ -154,7 +156,7 @@ training_arguments = TrainingArguments(
 )
 
 print("#### TOKENIZE DATA #####")
-max_length = 2048
+max_length = 4096
 def preprocess_function(examples):
     global text_field
     if isinstance(text_field, str):

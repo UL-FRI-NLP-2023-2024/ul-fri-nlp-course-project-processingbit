@@ -78,7 +78,7 @@ tokenizer.padding_side = 'right'
 model.config.use_cache = False
 
 #model = PeftModel.from_pretrained(model, model_id = './checkpoints/checkpoint-280', peft_config = bnb_config)
-model = PeftModel.from_pretrained(model, model_id = './clf-much-higher', peft_config = bnb_config)
+model = PeftModel.from_pretrained(model, model_id = './saved_clf_adapters/clf-much-higher', peft_config = bnb_config)
 model.config.pad_token_id = model.config.eos_token_id
 
 max_length = 2048
@@ -89,7 +89,6 @@ out = pipe(test_data['text'])
 preds = []
 for el in out:
     num = el['label'][-1]
-    print(num)
     idx = int(num)
     preds.append(id2label[idx])
 
