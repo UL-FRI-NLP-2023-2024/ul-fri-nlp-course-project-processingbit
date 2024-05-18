@@ -4,7 +4,10 @@ from pathlib import Path
 import joblib
 import requests
 import torch
-from transformers import AutoConfig, BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, pipeline, TrainingArguments, AutoModelForSequenceClassification, DataCollatorWithPadding
+from transformers import AutoConfig, BitsAndBytesConfig, AutoModelForCausalLM 
+from transformers import AutoTokenizer, pipeline, TrainingArguments, AutoModelForSequenceClassification, DataCollatorWithPadding
+from transformers import Trainer, TrainerCallback, EarlyStoppingCallback
+
 import xml.etree.ElementTree as ET
 import re
 import pandas as pd
@@ -30,17 +33,15 @@ from langchain_community.docstore.document import Document
 from datasets import load_from_disk
 
 from peft import LoraConfig, PeftConfig, get_peft_model
-import pyarrow.parquet as pq
 
-from transformers import Trainer 
-import os
+test_name = "parameter-search"
 
-print(os.getcwd())
+print("#### NAME #####")
+print(test_name)
 
 with open("./tokens/hugging_face_token.txt", "r") as file:
     ACCESS_TOKEN = file.read().strip()
     
-
 models = {
     "gemma": "google/gemma-7b", # NOT WORKING
     "mistral-22B": "mistralai/Mixtral-8x22B-Instruct-v0.1", # 
@@ -108,8 +109,9 @@ tokenizer.padding_side = 'right'
 
 #################### TRAINING ###################àà
 def compute_metrics(pred):
-    preds, labels = pred
+    preds, labels = pred.predictions, pred.label_ids
 
+    preds = np.argmax(preds, axis=1)
     # Calculate accuracy precision, recall, and F1-score
     accuracy = accuracy_score(labels, preds)
     precision = precision_score(labels, preds, average='weighted')
@@ -124,28 +126,30 @@ def compute_metrics(pred):
     }
 
 peft_config = LoraConfig(
-    lora_alpha=32,
+    lora_alpha=64,
     lora_dropout=0.1,
-    r=16,
+    r=64,
+    #target_modules="all-linear",
     task_type="SEQ_CLS"
 )
 
 print("#### GET PEFT #####")
 model = get_peft_model(model, peft_config)
+model.config.pad_token_id = model.config.eos_token_id
 
 training_arguments = TrainingArguments(
     output_dir="./checkpoints/",
-    per_device_train_batch_size=1,
-    per_device_eval_batch_size=1,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
     gradient_accumulation_steps=8,
-    #gradient_checkpointing_kwargs={'use_reentrant':False},
     optim="paged_adamw_32bit",
     num_train_epochs=10,
-    save_steps=500,
+    logging_steps=20,
+    save_steps=20,
     learning_rate=1e-4,
-    #label_names = ['label'],
     warmup_steps=100,
     load_best_model_at_end=True,
+    metric_for_best_model="f1",
     evaluation_strategy="steps",
 )
 
@@ -167,36 +171,31 @@ def preprocess_function(examples):
 
 
 tokenized_data = data.map(preprocess_function, batched=True)
-#tokenized_data = tokenized_data.remove_columns(data["train"].column_names)
-#tokenized_data = data
 
-#print(tokenized_data['train'][0])
 def encode_labels(example):
     example['labels'] = label2id[example['labels']]
     return example
 
 tokenized_data = tokenized_data.map(encode_labels)
-
-
-#tokenized_data.set_format(type='numpy', columns=['labels'])
-
 collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
 trainer = Trainer(
     model = model,
     tokenizer = tokenizer,
-    train_dataset = tokenized_data['train'],
+    train_dataset = tokenized_data['train'].shard(index=1, num_shards=10),
     eval_dataset = tokenized_data['test'],
     data_collator=collator,
     args=training_arguments,
-    compute_metrics = compute_metrics
+    compute_metrics = compute_metrics,
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
 )
 
-
 print("#### TRAIN ####")
+print(trainer.evaluate())
+
 trainer.train()
 
 print("#### SAVE ####")
 # Save the model
 model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model
-model_to_save.save_pretrained("clf")
+model_to_save.save_pretrained("clf-" + test_name)
