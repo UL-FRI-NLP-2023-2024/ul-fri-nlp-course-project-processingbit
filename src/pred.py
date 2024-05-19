@@ -29,7 +29,7 @@ LLM_MODEL = models["llama-3-8"]
 print(f'Model: {LLM_MODEL}')
 
 quantize = True
-dataset_file = './preprocessed/dataset_Discussion_with_history'
+dataset_file = './preprocessed/data_discussion_w_history_past-labels'
 text_field = 'text'
 
 ############# DATASET FOR TRAINING AND TEST ################
@@ -47,6 +47,19 @@ bnb_config = BitsAndBytesConfig(
     bnb_4bit_use_double_quant=True, # nested quantization
     bnb_4bit_compute_dtype=torch.bfloat16,
 )
+
+
+def get_extension(class_to_predict, use_history, use_past_labels, use_context):
+    extension = f'_{class_to_predict.lower()}'
+    if use_history or use_past_labels or use_context:
+        extension += '_w'
+        extension += '_history' if use_history else ''
+        extension += '_past-labels' if use_past_labels else ''
+        extension += '_context' if use_context else ''
+    return extension
+
+
+final_path = f"./pred_results/llamaForClassification_{get_extension('Discussion', True, True, False)}"
 
 # Fakes fix it 
 classes_to_predict = np.unique(data['labels'])
@@ -72,16 +85,18 @@ tokenizer = AutoTokenizer.from_pretrained(
     trust_remote_code=True,
     token=ACCESS_TOKEN
 )
-tokenizer.pad_token = tokenizer.eos_token
+
+pad_token = "[PAD]" 
+tokenizer.add_special_tokens({'pad_token': pad_token})
 tokenizer.padding_side = 'right'
+
+#data = data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True)})
+test_data = test_data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True)})
 
 model.config.use_cache = False
 
 #model = PeftModel.from_pretrained(model, model_id = './checkpoints/checkpoint-280', peft_config = bnb_config)
 model = PeftModel.from_pretrained(model, model_id = './saved_clf_adapters/clf-much-higher', peft_config = bnb_config)
-model.config.pad_token_id = model.config.eos_token_id
-
-max_length = 2048
 pipe = TextClassificationPipeline(model=model, tokenizer=tokenizer, return_all_scores=False)
 
 out = pipe(test_data['text'])
