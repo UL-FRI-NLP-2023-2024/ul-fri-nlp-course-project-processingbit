@@ -34,8 +34,14 @@ from datasets import load_from_disk
 
 from peft import LoraConfig, PeftConfig, get_peft_model
 
-test_name = "new_format"
+test_name = "new_format_fixed_history_lr_1e4_64"
 max_length = 2048
+rank = 64
+LR=1e-4
+
+quantize = True
+dataset_file = './preprocessed/llama_discussion_w_history_past-labels'
+text_field = 'text'
 
 print("#### NAME #####")
 print(test_name)
@@ -56,10 +62,6 @@ models = {
 
 LLM_MODEL = models["llama-3-8"]
 print(f'Model: {LLM_MODEL}')
-
-quantize = True
-dataset_file = './preprocessed/llama_discussion_w_history_past-labels'
-text_field = 'text'
 
 ############# DATASET FOR TRAINING AND TEST ################
 data_with_test = load_from_disk(dataset_file)
@@ -107,14 +109,9 @@ tokenizer = AutoTokenizer.from_pretrained(
     trust_remote_code=True,
     token=ACCESS_TOKEN
 )
-pad_token = "[PAD]" 
-#tokenizer.pad_token = pad_token
-tokenizer.add_special_tokens({'pad_token': pad_token})
-#print(tokenizer.eos_token)
+
+tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'right'
-encoded_input = tokenizer(pad_token, truncation=True, padding=False, return_tensors="pt")
-#print(f"encoded_input {encoded_input}")
-#print(f"id {id}")
 
 #################### TRAINING ###################àà
 def compute_metrics(pred):
@@ -135,37 +132,31 @@ def compute_metrics(pred):
     }
 
 peft_config = LoraConfig(
-    lora_alpha=64,
+    lora_alpha=rank,
     lora_dropout=0.1,
-    r=64,
+    r=rank,
     #target_modules="all-linear",
     task_type="SEQ_CLS"
 )
 
 print("#### GET PEFT #####")
-#model.config.pad_token_id = tokenizer.pad_token
-#model.resize_token_embeddings(len(tokenizer))
+model.config.pad_token_id = model.config.eos_token_id
 model = get_peft_model(model, peft_config)
-# without this cause we use a different pad token 
-# we get cuda indexing errors
-model.resize_token_embeddings(len(tokenizer))
 
 # model.config.pad_token_id = tokenizer.pad_token
 training_arguments = TrainingArguments(
     output_dir="./checkpoints/",
-    # BATCH size > 1 leads to error. Requires pad_token_id and 
-    # When I give it I get errors :(
-    per_device_train_batch_size=1,
-    per_device_eval_batch_size=1,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
     gradient_accumulation_steps=8,
     optim="paged_adamw_32bit",
     num_train_epochs=100,
     logging_steps=20,
     save_steps=20,
-    learning_rate=1e-4,
+    learning_rate=LR,
     warmup_steps=100,
     load_best_model_at_end=True,
-    metric_for_best_model="loss",
+    metric_for_best_model="f1",
     evaluation_strategy="steps",
 )
 
@@ -185,7 +176,10 @@ def preprocess_function(examples):
     return tokenizer(d, padding='longest', max_length=max_length, truncation=False)
 
 
-data = data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=False)})
+data = data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=False).replace(tokenizer.eos_token, "[eos]")})
+print(data['train']['text'][1])
+print("----------------------------")
+print(data['train']['text'][2])
 tokenized_data = data.map(preprocess_function, batched=True)
 
 def encode_labels(example):

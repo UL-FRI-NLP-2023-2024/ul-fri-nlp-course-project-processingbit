@@ -29,7 +29,7 @@ LLM_MODEL = models["llama-3-8"]
 print(f'Model: {LLM_MODEL}')
 
 quantize = True
-dataset_file = './preprocessed/data_discussion_w_history_past-labels'
+dataset_file = './preprocessed/llama_discussion_w_history_past-labels'
 text_field = 'text'
 
 ############# DATASET FOR TRAINING AND TEST ################
@@ -86,17 +86,15 @@ tokenizer = AutoTokenizer.from_pretrained(
     token=ACCESS_TOKEN
 )
 
-pad_token = "[PAD]" 
-tokenizer.add_special_tokens({'pad_token': pad_token})
+tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'right'
 
-#data = data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True)})
-test_data = test_data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True)})
+test_data = test_data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True).replace(tokenizer.eos_token, "[eos]")})
 
 model.config.use_cache = False
 
-#model = PeftModel.from_pretrained(model, model_id = './checkpoints/checkpoint-280', peft_config = bnb_config)
-model = PeftModel.from_pretrained(model, model_id = './saved_clf_adapters/clf-much-higher', peft_config = bnb_config)
+model = PeftModel.from_pretrained(model, model_id = './checkpoints/checkpoint-280', peft_config = bnb_config)
+#model = PeftModel.from_pretrained(model, model_id = './clf-new_format_fixed_history_lr_2e4_128', peft_config = bnb_config)
 pipe = TextClassificationPipeline(model=model, tokenizer=tokenizer, return_all_scores=False)
 
 out = pipe(test_data['text'])
