@@ -34,7 +34,8 @@ from datasets import load_from_disk
 
 from peft import LoraConfig, PeftConfig, get_peft_model
 
-test_name = "Input_4096_with_no_context"
+test_name = "new_format"
+max_length = 2048
 
 print("#### NAME #####")
 print(test_name)
@@ -57,7 +58,7 @@ LLM_MODEL = models["llama-3-8"]
 print(f'Model: {LLM_MODEL}')
 
 quantize = True
-dataset_file = './preprocessed/dataset_Discussion_with_history'
+dataset_file = './preprocessed/llama_discussion_w_history_past-labels'
 text_field = 'text'
 
 ############# DATASET FOR TRAINING AND TEST ################
@@ -106,8 +107,14 @@ tokenizer = AutoTokenizer.from_pretrained(
     trust_remote_code=True,
     token=ACCESS_TOKEN
 )
-tokenizer.pad_token = tokenizer.eos_token
+pad_token = "[PAD]" 
+#tokenizer.pad_token = pad_token
+tokenizer.add_special_tokens({'pad_token': pad_token})
+#print(tokenizer.eos_token)
 tokenizer.padding_side = 'right'
+encoded_input = tokenizer(pad_token, truncation=True, padding=False, return_tensors="pt")
+#print(f"encoded_input {encoded_input}")
+#print(f"id {id}")
 
 #################### TRAINING ###################àà
 def compute_metrics(pred):
@@ -136,27 +143,33 @@ peft_config = LoraConfig(
 )
 
 print("#### GET PEFT #####")
+#model.config.pad_token_id = tokenizer.pad_token
+#model.resize_token_embeddings(len(tokenizer))
 model = get_peft_model(model, peft_config)
-model.config.pad_token_id = model.config.eos_token_id
+# without this cause we use a different pad token 
+# we get cuda indexing errors
+model.resize_token_embeddings(len(tokenizer))
 
+# model.config.pad_token_id = tokenizer.pad_token
 training_arguments = TrainingArguments(
     output_dir="./checkpoints/",
+    # BATCH size > 1 leads to error. Requires pad_token_id and 
+    # When I give it I get errors :(
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     gradient_accumulation_steps=8,
     optim="paged_adamw_32bit",
-    num_train_epochs=50,
+    num_train_epochs=100,
     logging_steps=20,
     save_steps=20,
     learning_rate=1e-4,
     warmup_steps=100,
     load_best_model_at_end=True,
-    metric_for_best_model="f1",
+    metric_for_best_model="loss",
     evaluation_strategy="steps",
 )
 
 print("#### TOKENIZE DATA #####")
-max_length = 4096
 def preprocess_function(examples):
     global text_field
     if isinstance(text_field, str):
@@ -169,9 +182,10 @@ def preprocess_function(examples):
             for i, t in enumerate(nd):
                 d[i] += '\n' + t
 
-    return tokenizer(d, padding='longest', max_length=max_length, truncation=True)
+    return tokenizer(d, padding='longest', max_length=max_length, truncation=False)
 
 
+data = data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=False)})
 tokenized_data = data.map(preprocess_function, batched=True)
 
 def encode_labels(example):
@@ -181,10 +195,11 @@ def encode_labels(example):
 tokenized_data = tokenized_data.map(encode_labels)
 collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
+
 trainer = Trainer(
     model = model,
     tokenizer = tokenizer,
-    train_dataset = tokenized_data['train'].shard(index=1, num_shards=10),
+    train_dataset = tokenized_data['train'],
     eval_dataset = tokenized_data['test'],
     data_collator=collator,
     args=training_arguments,
