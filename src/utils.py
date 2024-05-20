@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from datasets import DatasetDict, load_dataset, Dataset, load_from_disk
 from tqdm import tqdm
+from sklearn.model_selection import train_test_split
 
 # Spelling
 from spellchecker import SpellChecker
@@ -322,17 +323,20 @@ def get_data_for_train_test(class_to_predict='Discussion',
     labels = [str(label) for label in data[class_to_predict]]
     indexes = data.index
 
-
-
-    final_dataset = Dataset.from_dict({
+    dataset = pd.DataFrame({
         'index': indexes,
         'text': prompts,
         'labels': labels
     })
-    final_dataset = final_dataset.class_encode_column('labels', include_nulls=True)
 
-    # Split into train and test
-    final_dataset = final_dataset.train_test_split(test_size=0.2, seed=42, stratify_by_column='labels')
+    train_data, test_data = train_test_split(dataset, test_size=0.4, random_state=42, stratify=dataset['labels'], shuffle=True)
+    validation_data, test_data = train_test_split(test_data, test_size=0.5, random_state=42, stratify=test_data['labels'], shuffle=True)
+
+    final_dataset = DatasetDict({
+        'train': Dataset.from_pandas(train_data, preserve_index=False),
+        'validation': Dataset.from_pandas(validation_data, preserve_index=False),
+        'test': Dataset.from_pandas(test_data, preserve_index=False)
+    })
     return final_dataset
 
 

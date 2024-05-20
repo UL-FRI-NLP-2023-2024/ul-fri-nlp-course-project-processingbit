@@ -19,16 +19,8 @@
       }
     ],
     "labels": {
-      "names": [
-        "Affirm",
-        "Clarify",
-        "Disagree",
-        "Elaborate",
-        "Filler",
-        "Prompt",
-        "nan"
-      ],
-      "_type": "ClassLabel"
+      "dtype": "string",
+      "_type": "Value"
     }
   },
   "homepage": "",

@@ -19,16 +19,8 @@
       }
     ],
     "labels": {
-      "names": [
-        "Deliberation",
-        "Imaginative Entry",
-        "Other",
-        "Procedure",
-        "Seminar",
-        "Social",
-        "UX"
-      ],
-      "_type": "ClassLabel"
+      "dtype": "string",
+      "_type": "Value"
     }
   },
   "homepage": "",
