@@ -29,11 +29,12 @@ LLM_MODEL = models["llama-3-8"]
 print(f'Model: {LLM_MODEL}')
 
 quantize = True
-dataset_file = './preprocessed/llama_discussion_w_history_past-labels'
+dataset_file = './preprocessed/llama_discussion_w_history_past-labels_context'
 text_field = 'text'
 
 ############# DATASET FOR TRAINING AND TEST ################
 data_with_test = load_from_disk(dataset_file)
+print(data_with_test)
 data = data_with_test['train']
 test_data = data_with_test['test']
 
@@ -109,8 +110,7 @@ test_data = test_data.map(preprocess_function, batched=True)
 
 model.config.use_cache = False
 
-#model = PeftModel.from_pretrained(model, model_id = './checkpoints/checkpoint-400', peft_config = bnb_config)
-model = PeftModel.from_pretrained(model, model_id = './clf-new_format_fixed_history_lr_2e4_64', peft_config = bnb_config)
+model = PeftModel.from_pretrained(model, model_id = '/d/hpc/home/nk93594/NLP/ul-fri-nlp-course-project-processingbit/src/saved_clf_adapters/checkpoint-220', peft_config = bnb_config)
 pipe = TextClassificationPipeline(model=model, tokenizer=tokenizer, return_all_scores=False)
 
 out = pipe(test_data['text'])
@@ -127,6 +127,9 @@ accuracy = accuracy_score(labels, preds)
 precision = precision_score(labels, preds, average='weighted')
 recall = recall_score(labels, preds, average='weighted')
 f1 = f1_score(labels, preds, average='weighted')
+
+
+np.save(final_path, preds)
 
 print(f"Classification Report:\n{classification_report(labels, preds)}")
 print(f"Accuracy: {accuracy:.2f}")
