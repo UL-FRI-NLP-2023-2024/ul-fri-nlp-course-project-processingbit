@@ -86,15 +86,31 @@ tokenizer = AutoTokenizer.from_pretrained(
     token=ACCESS_TOKEN
 )
 
+max_length = 2048
+def preprocess_function(examples):
+    global text_field
+    if isinstance(text_field, str):
+        d = examples[text_field]
+    else:
+        d = examples[text_field[0]]
+        for n in text_field[1:]:
+            nd = examples[n]
+            assert len(d) == len(nd)
+            for i, t in enumerate(nd):
+                d[i] += '\n' + t
+
+    return tokenizer(d, padding='longest', max_length=max_length, truncation=False)
+
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'right'
 
 test_data = test_data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True).replace(tokenizer.eos_token, "[eos]")})
+test_data = test_data.map(preprocess_function, batched=True)
 
 model.config.use_cache = False
 
-model = PeftModel.from_pretrained(model, model_id = './checkpoints/checkpoint-280', peft_config = bnb_config)
-#model = PeftModel.from_pretrained(model, model_id = './clf-new_format_fixed_history_lr_2e4_128', peft_config = bnb_config)
+#model = PeftModel.from_pretrained(model, model_id = './checkpoints/checkpoint-400', peft_config = bnb_config)
+model = PeftModel.from_pretrained(model, model_id = './clf-new_format_fixed_history_lr_2e4_64', peft_config = bnb_config)
 pipe = TextClassificationPipeline(model=model, tokenizer=tokenizer, return_all_scores=False)
 
 out = pipe(test_data['text'])
