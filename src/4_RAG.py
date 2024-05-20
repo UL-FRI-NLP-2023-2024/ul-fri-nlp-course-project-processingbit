@@ -2,7 +2,7 @@ import pandas as pd
 from utils import *
 
 ####### FILE CONFIGURATION #######
-DATASET_FILE = "./data/cleaned_data.csv"
+
     
 ##### MAIN FUNCTION ######
 
@@ -11,6 +11,7 @@ if __name__ == '__main__':
     use_history = True
     quantize = True
     window_size = -1
+    dataset_file = "./data/cleaned_data.csv"
 
     # Use default llm and retirever
     retriever = Retriever(xmls = ['./data/LadyOrThetigerIMapBook.xml'], 
@@ -24,13 +25,11 @@ if __name__ == '__main__':
     history_field = 'history'
 
     data = preprocess_data(
-        dataset_file=DATASET_FILE,
-        combine_fields = [],
-        separator = ': ',
+        dataset_file=dataset_file,
         text_field = text_field,
         history_field = history_field,
-        unique_keys_for_conversation =  ['book_id', 'bookclub', 'course'],
         window_size = window_size,
+        use_past_labels=False,
     )
 
     # Prompt requests with input and w/wo history

@@ -1,5 +1,7 @@
+import os
 import tempfile
 import requests
+import inspect
 import torch
 from transformers import AutoConfig, BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, pipeline
 import xml.etree.ElementTree as ET
@@ -58,11 +60,11 @@ def get_model_path(model_name):
 
 
 def get_model(model_name, 
-              quantize,
-              access_token):
+              quantize = False,
+              access_token = get_access_token()):
     # Model
-    device_string = PartialState().process_index
-    print('Using', device_string)
+    #device_string = PartialState().process_index
+    
     model_config = AutoConfig.from_pretrained(
         pretrained_model_name_or_path=model_name,
         token=access_token,
@@ -77,13 +79,14 @@ def get_model(model_name,
         pretrained_model_name_or_path=model_name,
         config=model_config,
         quantization_config=bnb_config if quantize else None,
-        device_map= {'': device_string},
+        device_map= "auto",
         token=access_token
     )
 
     return model
 
-def get_tokenizer(model_name, access_token):
+def get_tokenizer(model_name, 
+                  access_token = get_access_token()):
     # Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
         pretrained_model_name_or_path=model_name,
@@ -150,16 +153,16 @@ def get_classes(codebook):
 #############                PREPROCESSING             ##############
 #####################################################################
 
-def get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context):
-    return f'./preprocessed/{model_type}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}'
+def get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context, num_docs_as_context = 1):
+    return f'./preprocessed/{model_type}{get_extension(class_to_predict, use_history, use_past_labels, use_context, num_docs_as_context)}'
 
-def get_extension(class_to_predict, use_history, use_past_labels, use_context):
+def get_extension(class_to_predict, use_history, use_past_labels, use_context, num_docs_as_context = 1):
     extension = f'_{class_to_predict.lower()}'
     if use_history or use_past_labels or use_context:
         extension += '_w'
         extension += '_history' if use_history else ''
-        extension += '_past-labels' if use_past_labels else ''
-        extension += '_context' if use_context else ''
+        extension += '_past-labels' if use_past_labels and use_history else ''    
+        extension += f'_{num_docs_as_context}_context' if use_context else ''
     return extension
 
 def preprocess_data(
@@ -171,9 +174,12 @@ def preprocess_data(
         history_field = 'past_chat',
         history_label = 'past_labels',
         unique_keys_for_conversation =  ['book_id', 'bookclub', 'course'],
-        window_size = 3,
-        use_past_labels = False
+        window_size = 6,
+        use_past_labels = True
 ):
+    if use_past_labels and class_field == '':
+        raise ValueError('class_field must be defined if use_past_labels is True')
+
     data = pd.read_csv(dataset_file)
     if len(combine_fields) > 0:
         data[text_field] = data[combine_fields].apply(lambda x: separator.join(x.dropna().astype(str)), axis=1)
@@ -204,16 +210,115 @@ def preprocess_data(
 
     return data
 
-def load_data(model_class, class_to_predict, use_history, use_past_labels, use_context):
-    final_path = f'./preprocessed/{model_class}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}'
-    dataset = load_from_disk(final_path)
-    return dataset
-
 def split_data(data, test_size=0.2, random_state=42):
-    train_val_dataset = data.train_test_split(test_size=test_size, seed=random_state)
+    train_val_dataset = data['train'].train_test_split(test_size=test_size, seed=random_state)
     data['train'] = train_val_dataset['train']
     data['validation'] = train_val_dataset['test']
     return data
+
+def get_data_for_train_test(class_to_predict='Discussion',
+                use_history=True,
+                use_past_labels=True,
+                num_docs = 1,
+                model_type='mistral',
+                data_file='./data/cleaned_data.csv',
+                codebook_file='./data/codebook.xlsx',
+                context_file='./context/context.csv',
+                **data_args
+                ):
+    """
+    **data_args:
+    - combine_fields: list of fields to combine in the text_field
+    - separator: separator used to combine fields
+    - text_field: field to use as text
+    - class_field: field to use as class
+    - history_field: field to use as history
+    - history_label: field to use as history labels
+    - unique_keys_for_conversation: list of fields that uniquely identify a conversation
+    - window_size: size of the window to keep in the history
+    """
+
+    # get codebook
+    codebook = get_codebook(codebook_file)
+    
+    # get formatted codebook and classes to predict
+    formatted_codebook = get_formatted_codebook(codebook, class_to_predict)
+    classes_to_predict = get_classes_to_predict(codebook, class_to_predict)
+    
+    initial_prompt = "You are an AI expert in categorizing sentences into classes."
+
+    context_prompt = "Another assistant has retrieved some documents that might be useful for you to understand the context of the conversation, do not use them if not relevant."
+
+    codebook_prompt = "You can use the following codebook (with classes, definitions and examples) to help you ccategorize the sentence:\n"
+    codebook_prompt += "### IMPORTANT CODEBOOK:\n"
+    codebook_prompt += f"{formatted_codebook}\n"
+    codebook_prompt += "###\n"
+    codebook_prompt += "You need to categorize the new sentence into one of the following classes: [{classes}].\n".format(classes = ", ".join(classes_to_predict))
+    codebook_prompt += "If you fail to categorize the sentence, return 'None' instead of coming up with a wrong class.\n"
+
+    history_prompt = "You can use the history of the conversation to help you categorize the sentence."
+
+    data_args['use_past_labels'] = use_past_labels
+    default_data_args = inspect.signature(preprocess_data).parameters
+    for key in default_data_args:
+        if key not in data_args:
+            data_args[key] = default_data_args[key].default
+    
+    data_args['dataset_file'] = data_file
+    data_args['class_field'] = class_to_predict
+    data = preprocess_data(**data_args)
+
+    # getting the context
+    if num_docs > 0:
+        context = pd.read_csv(context_file)
+
+    # Add input
+    prompts = []
+    for ind, row in data.iterrows():
+        system_message = initial_prompt
+
+        if num_docs > 0:
+            system_message += f"\n{context_prompt}"
+            docs = context.iloc[ind].values.tolist()
+            for doc in docs[:num_docs]:
+                system_message += f"\n{doc}"
+
+        system_message += f"\n{codebook_prompt}"
+
+        if use_history:
+            system_message += f"\n{history_prompt}"
+
+        # No system for mistral
+        if model_type == "mistral":
+            message = [{ "role": "user", "content": system_message}]
+            message.append({ "role": "assistant", "content": "Ok, let's start!"})
+
+        # System for llama
+        if model_type == "llama":
+            message = [{ "role": "system", "content": system_message}]
+        
+        if use_history:
+            for i, chat in enumerate(row[data_args['history_field']]):
+                message.append({ "role": "user", "content": chat})
+                if use_past_labels:
+                    message.append({ "role": "assistant", "content": f'Class: {row[data_args["history_label"]][i]}'})
+        
+        message.append({ "role": "user", "content": row[data_args['text_field']]})
+        prompts.append(message)
+
+    # COMBINE PROMPTS WITH FINAL CLASSES IN PANDAS
+    labels = [str(label) for label in data[class_to_predict]]
+    indexes = data.index
+
+    final_dataset = Dataset.from_dict({
+        'index': indexes,
+        'text': prompts,
+        'labels': labels
+    })
+
+    # Split into train and test
+    final_dataset = final_dataset.train_test_split(test_size=0.2, seed=42)
+    return final_dataset
 
 
 #####################################################################
@@ -253,6 +358,43 @@ def find_first(sentence, items):
 
 def get_results_path(model_type, class_to_predict, use_history, use_past_labels, use_context):
     return f'./pred_results/{model_type}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}'
+
+def parse_filename(filename):
+    """
+    Parse the filename to extract the method used and the features encoded in the extension.
+    """
+    # Remove the .npy extension to ease parsing
+    base_name = filename[:-4]
+    
+    # Split the base_name by '_' to separate method_used from the extension
+    parts = base_name.split('_')
+    method_used = parts[0]
+    class_to_predict = parts[1]  # The first part after method_used is always class_to_predict
+    use_history = 'history' in parts
+    use_past_labels = 'past-labels' in parts
+    use_context = 'context' in parts
+    
+    return method_used, class_to_predict, use_history, use_past_labels, use_context
+
+def load_data_predicts(path_dir, class_to_predict):
+    dataset = get_data_for_train_test(class_to_predict=class_to_predict,
+                                      use_history=False,
+                                      use_past_labels=False,
+                                      num_docs=0,
+                                      model_type='mistral')
+    data = pd.DataFrame(dataset['test'])
+
+
+    # Loop through each .npy file in the directory
+    for file in os.listdir(path_dir):
+        if file.endswith(".npy"):
+            features = parse_filename(file)
+            if class_to_predict.lower() == features[1].lower():
+                name = file[:-4]
+                predictions = np.load(path_dir + file)
+                data[name] = predictions
+    
+    return data
 
 #####################################################################
 #############                RETRIEVER                ###############

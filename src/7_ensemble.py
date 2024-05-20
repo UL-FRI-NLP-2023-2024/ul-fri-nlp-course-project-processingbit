@@ -42,55 +42,32 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from utils import *
 
 
-ACCESS_TOKEN = get_access_token()
-
-model_name = "mistral-8B"
-LLM_MODEL = get_model_path(model_name)
-print(f'Model: {LLM_MODEL}')
-
-PATH_DIR = "./pred_results/"
 
 
-
-def parse_filename(filename):
-    """
-    Parse the filename to extract the method used and the features encoded in the extension.
-    """
-    # Remove the .npy extension to ease parsing
-    base_name = filename[:-4]
+def build_message(class_to_predict, data):
     
-    # Split the base_name by '_' to separate method_used from the extension
-    parts = base_name.split('_')
-    method_used = parts[0]
-    features = parts[1:]
+    message = data['text']
+    print(f'Message: {message[0]}')
+
+
+
+    return message
+
+if __name__ == "__main__":
+    class_to_predict = "Discussion"
+    path_dir = "./pred_results/"
+
+    model_name = "llama-3-8"
+    llm_model = get_model_path(model_name)
+    print(f'Model: {llm_model}')
+
+    data = load_data_predicts(path_dir, class_to_predict)
     
-    return method_used, features
+    message = build_message(class_to_predict, data)
 
-def match_features(features):
-    """
-    Match the features list with the corresponding boolean flags.
-    """
-    class_to_predict = features[0]  # The first part after method_used is always class_to_predict
-    use_history = 'history' in features
-    use_past_labels = 'past-labels' in features
-    use_context = 'context' in features
+    # Load the model
+    #model = get_model(model_name, quantize=True)
+    #tokenizer = get_tokenizer(model_name)
+
     
-    return class_to_predict, use_history, use_past_labels, use_context
-
-
-def load_data_predicts(class_to_predict):
-    dataset = load_from_disk(f"./preprocessed/data_{get_extension(class_to_predict, False, False, False)}")
-    data = pd.DataFrame(dataset['test'])
-
-    # Loop through each .npy file in the directory
-    for file in os.listdir(PATH_DIR):
-        if file.endswith(".npy"):
-            method_used, features = parse_filename(file)
-            class_to_predict, use_history, use_past_labels, use_context = match_features(features)
-            if class_to_predict == class_to_predict:
-                name = file[:-4]
-                predictions = np.load(PATH_DIR + file)
-                data[name] = predictions
-    
-    return data
 

@@ -11,32 +11,39 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 
 from utils import *
 
-model_name = "mistral-7B"
-model_class = "mistral"
-LLM_MODEL = get_model_path(model_name)
-print(f'Model: {LLM_MODEL}')
-
 if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
+    
+    model_name = "mistral-7B"
+    model_class = "mistral"
+    llm_model = get_model_path(model_name)
+    print(f'Model: {llm_model}')
+
+    use_adapter = True
+    load_adapter = False
+    quantize = True
 
     # Load data
     class_to_predict = 'Discussion'
     use_history = True
     use_past_labels = True
-    use_context = False
+    use_context = True
+    num_docs = 2
 
-    dataset = load_data(class_to_predict, use_history, use_past_labels, use_context)
+    dataset = get_data_for_train_test(
+        class_to_predict=class_to_predict,
+        use_history=use_history,
+        use_past_labels=use_past_labels,
+        num_docs=num_docs,
+        model_type=model_class)
+    
     dataset = split_data(dataset, test_size=0.2, random_state=42)
     classes = np.unique(dataset['train']['labels'])
 
     # Model and tokenizer
-    use_adapter = True
-    load_adapter = False
-    quantize = True
-
-    model = get_model(LLM_MODEL, quantize)
-    tokenizer = get_tokenizer(LLM_MODEL)
+    model = get_model(llm_model, quantize)
+    tokenizer = get_tokenizer(llm_model)
 
     ### SETTING TOKENIZER ###
     tokenizer.pad_token = tokenizer.eos_token
@@ -45,28 +52,25 @@ if __name__ == '__main__':
     tokenizer.add_bos_token = False
     tokenizer.add_eos_token = False
     print("Add bos, eos tokens", tokenizer.add_eos_token, tokenizer.add_bos_token)
-    
-    #pad_token = "[PAD]"     
-    #tokenizer.add_special_tokens({'pad_token': pad_token})
-    #tokenizer.padding_side = 'right'
+    print('Assistant token:', tokenizer.apply_chat_template("", tokenize=False, add_generation_prompt=True))
 
-    #print("PAD token/id", pad_token, tokenizer.convert_tokens_to_ids(pad_token))
-
+    # Format the text
     dataset = dataset.map(lambda x: {"formatted_text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=False)})
+    
+    # max token length
+    tokens = tokenizer(dataset['train']['formatted_text'], padding=True, return_tensors='pt')
+    max_tokens = tokens['input_ids'].shape[1]
+    print('Max tokens:', max_tokens)
+    
     print("Formatted sentence: ", dataset['train']['formatted_text'][0])
     print()
-    # tokenize the first example
+
+    # tokenize the first example and decode it
     example_token = tokenizer(dataset['train']['formatted_text'][0], padding=True, return_tensors='pt')
     example_sentence = tokenizer.decode(example_token['input_ids'][0])
     print('Example sentence: ', example_sentence)
     print()
 
-    print('Assistant token:', tokenizer.apply_chat_template("", tokenize=False, add_generation_prompt=True))
-
-    # max token length
-    tokens = tokenizer(dataset['train']['formatted_text'], padding=True, return_tensors='pt')
-    max_tokens = tokens['input_ids'].shape[1]
-    print('Max tokens:', max_tokens)
     
     ########################## TRAINING ##########################
     
@@ -90,7 +94,7 @@ if __name__ == '__main__':
 
     training_arguments = TrainingArguments(
         output_dir="./checkpoints",
-        num_train_epochs=10,
+        num_train_epochs=20,
         
         per_device_train_batch_size=2,
         per_device_eval_batch_size=2,
@@ -101,10 +105,10 @@ if __name__ == '__main__':
         optim="paged_adamw_32bit",
 
         save_strategy='steps',
-        save_steps=200,
+        save_steps=100,
 
         evaluation_strategy='steps',
-        eval_steps=50,
+        eval_steps=20,
 
         learning_rate=2e-4,
         #fp16=True,
@@ -135,16 +139,13 @@ if __name__ == '__main__':
         #label_ids[label_ids == -100] = tokenizer.pad_token_id
         #label_str = tokenizer.batch_decode(label_ids, skip_special_tokens=True)
         predictions, labels = pred
-        decoded_preds = tokenizer.batch_decode(predictions, skip_special_tokens=True)
+        predictions = tokenizer.batch_decode(predictions, skip_special_tokens=True)
         # Replace -100 in the labels as we can't decode them.
-        labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-        decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+        labels = [label if label != -100 else tokenizer.pad_token_id for label in labels]
+        labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
         
-        print('Generated:', decoded_preds)
-        preds = [find_first(text, classes) for text in decoded_preds]
-        print('Preds:', preds)
-
-        print('Labels:', decoded_labels)
+        preds = [find_first(text, classes) for text in predictions]
+        
 
         return {
             'accuracy': accuracy_score(labels, preds),

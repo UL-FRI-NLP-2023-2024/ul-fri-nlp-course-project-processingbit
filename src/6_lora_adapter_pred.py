@@ -25,8 +25,15 @@ if __name__ == '__main__':
     use_history = True
     use_past_labels = True
     use_context = False
+    num_docs = 2
 
-    dataset = load_data(class_to_predict, use_history, use_past_labels, use_context)
+    dataset = get_data_for_train_test(
+        class_to_predict=class_to_predict,
+        use_history=use_history,
+        use_past_labels=use_past_labels,
+        num_docs=num_docs,
+        model_type=model_class)
+
     dataset = split_data(dataset, test_size=0.2, random_state=42)
     classes = np.unique(dataset['train']['labels'])
 
