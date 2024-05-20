@@ -105,12 +105,12 @@ def preprocess_function(examples):
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = 'right'
 
-test_data = test_data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True).replace(tokenizer.eos_token, "[eos]")})
+test_data = test_data.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=False).replace(tokenizer.eos_token, "[eos]")})
 test_data = test_data.map(preprocess_function, batched=True)
 
 model.config.use_cache = False
 
-model = PeftModel.from_pretrained(model, model_id = '/d/hpc/home/nk93594/NLP/ul-fri-nlp-course-project-processingbit/src/saved_clf_adapters/checkpoint-220', peft_config = bnb_config)
+model = PeftModel.from_pretrained(model, model_id = '/d/hpc/home/nk93594/NLP/ul-fri-nlp-course-project-processingbit/src/saved_clf_adapters/clf-new_format_fixed_history_lr_2e4_64', peft_config = bnb_config)
 pipe = TextClassificationPipeline(model=model, tokenizer=tokenizer, return_all_scores=False)
 
 out = pipe(test_data['text'])
