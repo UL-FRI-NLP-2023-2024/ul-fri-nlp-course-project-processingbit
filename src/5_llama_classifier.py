@@ -34,13 +34,14 @@ from datasets import load_from_disk
 
 from peft import LoraConfig, PeftConfig, get_peft_model
 
-test_name = "new_format_fixed_history_lr_1e4_64"
+test_name = "new_format_fixed_history_lr_2e4_4_context_patience_3_epoch_100"
 max_length = 2048
-rank = 64
-LR=1e-4
+rank = 4
+LR = 2e-4
+patience = 3
 
 quantize = True
-dataset_file = './preprocessed/llama_discussion_w_history_past-labels'
+dataset_file = './preprocessed/llama_discussion_w_history_past-labels_context'
 text_field = 'text'
 
 print("#### NAME #####")
@@ -65,7 +66,7 @@ print(f'Model: {LLM_MODEL}')
 
 ############# DATASET FOR TRAINING AND TEST ################
 data_with_test = load_from_disk(dataset_file)
-data = data_with_test['train'].train_test_split(test_size=0.2, seed=42)
+data = DatasetDict({'train': data_with_test['train'], 'test': data_with_test['validation']})
 
 print(data.shape)
 
@@ -155,8 +156,8 @@ training_arguments = TrainingArguments(
     save_steps=20,
     learning_rate=LR,
     warmup_steps=100,
-    load_best_model_at_end=True,
-    metric_for_best_model="f1",
+    load_best_model_at_end=False,
+    metric_for_best_model="loss",
     evaluation_strategy="steps",
 )
 
@@ -198,7 +199,7 @@ trainer = Trainer(
     data_collator=collator,
     args=training_arguments,
     compute_metrics = compute_metrics,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=patience)]
 )
 
 print("#### TRAIN ####")
