@@ -156,7 +156,7 @@ training_arguments = TrainingArguments(
     save_steps=20,
     learning_rate=LR,
     warmup_steps=100,
-    load_best_model_at_end=False,
+    load_best_model_at_end=True,
     metric_for_best_model="loss",
     evaluation_strategy="steps",
 )
