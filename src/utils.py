@@ -403,7 +403,6 @@ def load_data_predicts(path_dir, class_to_predict, model_name='mistral'):
                                       model_name=model_name)
     data = pd.DataFrame(dataset['test'])
 
-
     # Loop through each .npy file in the directory
     for file in os.listdir(path_dir):
         if file.endswith(".npy"):
