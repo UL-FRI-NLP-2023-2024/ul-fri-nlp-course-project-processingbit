@@ -30,7 +30,6 @@ if __name__ == '__main__':
     use_context = True
 
     dataset = load_data(model_name, class_to_predict, use_history, use_past_labels, use_context)
-    
     dataset = split_data(dataset, test_size=0.2, random_state=42)
     classes = np.unique(dataset['train']['labels'])
 
@@ -80,14 +79,14 @@ if __name__ == '__main__':
         num_train_epochs=20,
         per_device_train_batch_size=1,
         per_device_eval_batch_size=1,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=8,
         #gradient_checkpointing_kwargs={'use_reentrant': False},
         optim="paged_adamw_32bit",
 
         save_strategy='steps',
-        save_steps=20,
+        save_steps=30,
 
-        logging_steps=20,
+        logging_steps=30,
         evaluation_strategy='steps',
         #eval_acculamtion_steps=1,
         #eval_steps=20,
@@ -99,8 +98,6 @@ if __name__ == '__main__':
         #group_by_length=True,
         lr_scheduler_type="linear", # "linear", "cosine"
         warmup_steps=100,
-        #report_to="none",
-
         load_best_model_at_end=True,
         metric_for_best_model="f1",
     )
@@ -165,7 +162,7 @@ if __name__ == '__main__':
 
     # Save the model
     model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model  # Take care of distributed/parallel training
-    model_to_save.save_pretrained(f"./adapters/mistral{get_extension(class_to_predict, use_history, use_context)}")
+    model_to_save.save_pretrained(f"./adapters/{model_name}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}")
 
     # Testing
     model.config.use_cache = True

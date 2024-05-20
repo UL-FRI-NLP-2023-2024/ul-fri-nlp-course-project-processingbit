@@ -42,17 +42,6 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from utils import *
 
 
-
-
-def build_message(data, class_to_predict):
-    
-    all_message = data['text']
-    
-    new_initial_prompt = "You are an ensemble model. You have to predict the class of the following text, based on the results of other models."
-
-
-    return message
-
 if __name__ == "__main__":
     class_to_predict = "Discussion"
     path_dir = "./pred_results/"
@@ -63,8 +52,35 @@ if __name__ == "__main__":
 
     data = load_data_predicts(path_dir, class_to_predict, model_name)
     
-    message = build_message(data, class_to_predict)
+    # Message used to ask the llm for an explanation
+    explanation_message = "Based on the previous chat, can you explain to me why you have chosen the last class?"
+
+    # Retrieve one message from the test data for proof of concept
+    test_data = data.iloc[0]
+    test_index = test_data['index']
+    test_message = test_data['text']
+    test_label = test_data['labels']
+    label_from_model = "Seminar"
+
+    test_message.append({
+        "role": "assistant",
+        "content": f"Class: {label_from_model}"
+        }
+    )
+    test_message.append({
+        "role": "user",
+        "content": explanation_message
+        }
+    )
 
     # Load the model
-    #model = get_model(model_name, quantize=True)
-    #tokenizer = get_tokenizer(model_name)
+    model = get_model(model_name, quantize=True)
+    tokenizer = get_tokenizer(model_name)
+
+    # Format the text
+    test_message = tokenizer.apply_chat_template(test_message, tokenize=False, add_generation_prompt=True)
+    print(test_message)
+
+    # Get the explanation
+    explanation = model.generate_text(test_message, max_length=512)
+    print(explanation)

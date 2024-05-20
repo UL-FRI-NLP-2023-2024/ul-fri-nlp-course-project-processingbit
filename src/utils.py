@@ -153,16 +153,21 @@ def get_classes(codebook):
 #############                PREPROCESSING             ##############
 #####################################################################
 
-def get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, num_docs = 1):
-    return f'./preprocessed/{model_type}{get_extension(class_to_predict, use_history, use_past_labels, num_docs)}'
+def get_preprocessed_path(model_name, class_to_predict, use_history, use_past_labels, use_context):
+    if model_name.startswith("mistral"):
+        model_name = "mistral"
+    elif model_name.startswith("llama"):
+        model_name = "llama"
+        
+    return f'./preprocessed/{model_name}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}'
 
-def get_extension(class_to_predict, use_history, use_past_labels, num_docs = 1):
+def get_extension(class_to_predict, use_history, use_past_labels, use_context):
     extension = f'_{class_to_predict.lower()}'
-    if use_history or use_past_labels or num_docs > 0:
+    if use_history or use_past_labels or use_context:
         extension += '_w'
         extension += '_history' if use_history else ''
         extension += '_past-labels' if use_past_labels and use_history else ''    
-        extension += '_context' if num_docs > 0 else ''
+        extension += '_context' if use_context else ''
     return extension
 
 def preprocess_data(
@@ -216,12 +221,12 @@ def split_data(data, test_size=0.2, random_state=42):
     data['validation'] = train_val_dataset['test']
     return data
 
-def load_data(model_type, class_to_predict, use_history, use_past_labels, num_docs = 2):
-    data = load_from_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, num_docs))
+def load_data(model_type, class_to_predict, use_history, use_past_labels, use_context):
+    data = load_from_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context))
     return data
 
-def save_data(data, model_type, class_to_predict, use_history, use_past_labels, num_docs = 2):
-    data.save_to_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, num_docs))
+def save_data(data, model_type, class_to_predict, use_history, use_past_labels, use_context):
+    data.save_to_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context))
 
 def get_data_for_train_test(class_to_predict='Discussion',
                 use_history=True,
