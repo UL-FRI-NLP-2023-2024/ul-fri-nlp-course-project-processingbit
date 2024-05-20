@@ -74,13 +74,29 @@ if __name__ == "__main__":
     )
 
     # Load the model
-    model = get_model(model_name, quantize=True)
-    tokenizer = get_tokenizer(model_name)
+    model = get_model(llm_model, quantize=True)
+    model.config.use_cache = True
+    model.eval()
+
+    tokenizer = get_tokenizer(llm_model)
 
     # Format the text
     test_message = tokenizer.apply_chat_template(test_message, tokenize=False, add_generation_prompt=True)
     print(test_message)
 
-    # Get the explanation
-    explanation = model.generate_text(test_message, max_length=512)
-    print(explanation)
+    pipe = pipeline(
+            task="text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            return_full_text=False,
+            temperature=0.5,
+            max_new_tokens=150,
+            repetition_penalty=1.5,
+            do_sample=True,
+        )
+
+    # Generate the explanation
+    explanation = pipe(test_message)
+    generated_explanation = explanation[0]['generated_text']
+    print("Generated explanation:")
+    print(generated_explanation)

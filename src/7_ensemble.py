@@ -42,8 +42,6 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from utils import *
 
 
-
-
 def build_message(data, class_to_predict):
     
     all_message = data['text']
