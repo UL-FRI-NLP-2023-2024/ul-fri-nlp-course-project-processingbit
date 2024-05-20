@@ -317,14 +317,17 @@ def get_data_for_train_test(class_to_predict='Discussion',
     labels = [str(label) for label in data[class_to_predict]]
     indexes = data.index
 
+
+
     final_dataset = Dataset.from_dict({
         'index': indexes,
         'text': prompts,
         'labels': labels
     })
+    final_dataset = final_dataset.class_encode_column('labels', include_nulls=True)
 
     # Split into train and test
-    final_dataset = final_dataset.train_test_split(test_size=0.2, seed=42)
+    final_dataset = final_dataset.train_test_split(test_size=0.2, seed=42, stratify_by_column='labels')
     return final_dataset
 
 
