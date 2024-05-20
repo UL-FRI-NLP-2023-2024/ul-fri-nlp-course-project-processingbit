@@ -44,11 +44,11 @@ from utils import *
 
 
 
-def build_message(class_to_predict, data):
+def build_message(data, class_to_predict):
     
-    message = data['text']
-    print(f'Message: {message[0]}')
-
+    all_message = data['text']
+    
+    new_initial_prompt = "You are an ensemble model. You have to predict the class of the following text, based on the results of other models."
 
 
     return message
@@ -61,9 +61,9 @@ if __name__ == "__main__":
     llm_model = get_model_path(model_name)
     print(f'Model: {llm_model}')
 
-    data = load_data_predicts(path_dir, class_to_predict)
+    data = load_data_predicts(path_dir, class_to_predict, model_name)
     
-    message = build_message(class_to_predict, data)
+    message = build_message(data, class_to_predict)
 
     # Load the model
     #model = get_model(model_name, quantize=True)

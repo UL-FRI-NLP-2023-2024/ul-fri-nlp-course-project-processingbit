@@ -47,14 +47,14 @@ models = {
 def get_model_path(model_name):
     """
     Model names available:
-    - gemma = google/gemma-7b
-    - mistral-22B = mistralai/Mixtral-8x22B-Instruct-v0.1
-    - mistral-7B = mistralai/Mistral-7B-Instruct-v0.2
-    - llama-grand-2 = meta-llama/Meta-Llama-Grand-2-8B
-    - llama-2-13B = llama-2-13b-chat-hf
-    - llama-2-70B = llama-2-70b-chat-hf
-    - llama-3-8 = llama-3-8b-chat-hf
-    - llama-3-70 = llama-3-70b-chat-hf
+    - "gemma": "google/gemma-7b",
+    - "mistral-22B": "mistralai/Mixtral-8x22B-Instruct-v0.1",
+    - "mistral-7B" : "mistralai/Mistral-7B-Instruct-v0.2",
+    - "llama-grand-2" : "meta-llama/Meta-Llama-Grand-2-8B",
+    - "llama-2-13B" : "meta-llama/Llama-2-13b-chat-hf", 
+    - "llama-2-70B" : "meta-llama/Llama-2-70b-chat-hf", 
+    - "llama-3-8" : "meta-llama/Meta-Llama-3-8B-Instruct",
+    - "llama-3-70" : "meta-llama/Meta-Llama-3-70B-Instruct",
     """
     return models[model_name]
 
@@ -216,11 +216,18 @@ def split_data(data, test_size=0.2, random_state=42):
     data['validation'] = train_val_dataset['test']
     return data
 
+def load_data(model_type, class_to_predict, use_history, use_past_labels, use_context, num_docs_as_context = 1):
+    data = load_from_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context, num_docs_as_context))
+    return data
+
+def save_data(data, model_type, class_to_predict, use_history, use_past_labels, use_context, num_docs_as_context = 1):
+    data.save_to_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context, num_docs_as_context))
+
 def get_data_for_train_test(class_to_predict='Discussion',
                 use_history=True,
                 use_past_labels=True,
                 num_docs = 1,
-                model_type='mistral',
+                model_name='mistral',
                 data_file='./data/cleaned_data.csv',
                 codebook_file='./data/codebook.xlsx',
                 context_file='./context/context.csv',
@@ -289,12 +296,12 @@ def get_data_for_train_test(class_to_predict='Discussion',
             system_message += f"\n{history_prompt}"
 
         # No system for mistral
-        if model_type == "mistral":
+        if model_name.startswith("mistral"):
             message = [{ "role": "user", "content": system_message}]
             message.append({ "role": "assistant", "content": "Ok, let's start!"})
 
         # System for llama
-        if model_type == "llama":
+        if model_name.startswith("llama"):
             message = [{ "role": "system", "content": system_message}]
         
         if use_history:
@@ -376,12 +383,12 @@ def parse_filename(filename):
     
     return method_used, class_to_predict, use_history, use_past_labels, use_context
 
-def load_data_predicts(path_dir, class_to_predict):
+def load_data_predicts(path_dir, class_to_predict, model_name='mistral'):
     dataset = get_data_for_train_test(class_to_predict=class_to_predict,
                                       use_history=False,
                                       use_past_labels=False,
                                       num_docs=0,
-                                      model_type='mistral')
+                                      model_name=model_name)
     data = pd.DataFrame(dataset['test'])
 
 

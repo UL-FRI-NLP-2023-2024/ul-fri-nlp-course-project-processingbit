@@ -36,7 +36,7 @@ if __name__ == '__main__':
         use_history=use_history,
         use_past_labels=use_past_labels,
         num_docs=num_docs,
-        model_type=model_class)
+        model_name=model_class)
     
     dataset = split_data(dataset, test_size=0.2, random_state=42)
     classes = np.unique(dataset['train']['labels'])
@@ -55,22 +55,12 @@ if __name__ == '__main__':
     print('Assistant token:', tokenizer.apply_chat_template("", tokenize=False, add_generation_prompt=True))
 
     # Format the text
-    dataset = dataset.map(lambda x: {"formatted_text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=False)})
+    dataset = dataset.map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True)})
     
     # max token length
-    tokens = tokenizer(dataset['train']['formatted_text'], padding=True, return_tensors='pt')
+    tokens = tokenizer(dataset['train']['text'], padding=True, return_tensors='pt')
     max_tokens = tokens['input_ids'].shape[1]
     print('Max tokens:', max_tokens)
-    
-    print("Formatted sentence: ", dataset['train']['formatted_text'][0])
-    print()
-
-    # tokenize the first example and decode it
-    example_token = tokenizer(dataset['train']['formatted_text'][0], padding=True, return_tensors='pt')
-    example_sentence = tokenizer.decode(example_token['input_ids'][0])
-    print('Example sentence: ', example_sentence)
-    print()
-
     
     ########################## TRAINING ##########################
     
@@ -93,22 +83,21 @@ if __name__ == '__main__':
     print_trainable_parameters(lora_model)    
 
     training_arguments = TrainingArguments(
-        output_dir="./checkpoints",
+        output_dir= f"./checkpoints_{model_name}",
         num_train_epochs=20,
-        
-        per_device_train_batch_size=2,
-        per_device_eval_batch_size=2,
-        #auto_find_batch_size=True, # FIND THE BEST BATCH SIZE THAT FEEDS THE GPU
-
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
         gradient_accumulation_steps=4,
         #gradient_checkpointing_kwargs={'use_reentrant': False},
         optim="paged_adamw_32bit",
 
         save_strategy='steps',
-        save_steps=100,
+        save_steps=20,
 
+        logging_steps=20,
         evaluation_strategy='steps',
-        eval_steps=20,
+        #eval_acculamtion_steps=1,
+        #eval_steps=20,
 
         learning_rate=2e-4,
         #fp16=True,
@@ -116,8 +105,8 @@ if __name__ == '__main__':
         #max_steps=-1,
         #group_by_length=True,
         lr_scheduler_type="linear", # "linear", "cosine"
-        warmup_ratio=0.1,
-        report_to="none",
+        warmup_steps=100,
+        #report_to="none",
 
         load_best_model_at_end=True,
         metric_for_best_model="f1",
@@ -126,7 +115,7 @@ if __name__ == '__main__':
     # Setting sft parameters
     def formatting_prompts_func(example):
         output_texts = []
-        for formatted_text, label in zip(example['formatted_text'], example['labels']):
+        for formatted_text, label in zip(example['text'], example['labels']):
             text = f"{formatted_text} {label}"
             output_texts.append(text)
         return output_texts
@@ -141,12 +130,11 @@ if __name__ == '__main__':
         predictions, labels = pred
         predictions = tokenizer.batch_decode(predictions, skip_special_tokens=True)
         # Replace -100 in the labels as we can't decode them.
-        labels = [label if label != -100 else tokenizer.pad_token_id for label in labels]
+        labels[labels == -100] = tokenizer.pad_token_id
         labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
         
         preds = [find_first(text, classes) for text in predictions]
         
-
         return {
             'accuracy': accuracy_score(labels, preds),
             'precision': precision_score(labels, preds, average='weighted'),
@@ -172,19 +160,15 @@ if __name__ == '__main__':
         callbacks = [EarlyStoppingCallback(early_stopping_patience=3)]
     )
     
-    # Hyperparameter search
-    #best_run = trainer.hyperparameter_search(n_trials=10, direction="maximize")
-    #print(best_run)
-    #for n, v in best_run.hyperparameters.items():
-    #    setattr(trainer.args, n, v)
-    
     # Training
     trainer.train()
 
     # Evaluation
     eval_results = trainer.evaluate()
-    test_results = trainer.predict(dataset['test'])
     print(eval_results)
+
+    test_results = trainer.predict(dataset['test'])
+    print(test_results)
 
     # Save the model
     model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model  # Take care of distributed/parallel training

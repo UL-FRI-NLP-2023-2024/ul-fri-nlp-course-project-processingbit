@@ -32,7 +32,7 @@ if __name__ == '__main__':
         use_history=use_history,
         use_past_labels=use_past_labels,
         num_docs=num_docs,
-        model_type=model_class)
+        model_name=model_class)
 
     dataset = split_data(dataset, test_size=0.2, random_state=42)
     classes = np.unique(dataset['train']['labels'])
