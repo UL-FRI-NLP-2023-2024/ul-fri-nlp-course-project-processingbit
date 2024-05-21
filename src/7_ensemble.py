@@ -41,16 +41,6 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 
 from utils import *
 
-
-def build_message(data, class_to_predict):
-    
-    all_message = data['text']
-    
-    new_initial_prompt = "You are an ensemble model. You have to predict the class of the following text, based on the results of other models."
-
-
-    return message
-
 if __name__ == "__main__":
     class_to_predict = "Discussion"
     path_dir = "./pred_results/"
@@ -59,9 +49,41 @@ if __name__ == "__main__":
     llm_model = get_model_path(model_name)
     print(f'Model: {llm_model}')
 
+    ######### Preprocess data #########
     data = load_data_predicts(path_dir, class_to_predict, model_name)
+    prep_data = preprocess_data(dataset_file='./data/cleaned_data.csv',
+                                    class_field='Discussion')
     
-    message = build_message(data, class_to_predict)
+    # Merge the data
+    #left_data = data.drop(columns=['text'])
+    results = pd.merge(data, prep_data[['message']], left_on='index', right_index=True)
+
+    model_types = results.columns
+    model_types.drop(columns=['index', 'message', 'labels', 'text'])
+
+    initial_prompt = "You are an ensemble AI. You have to predict the class of the following text, based on the results of other models.\n"
+    initial_prompt += "You will receive some information about the classes, the text and the other models predictions.\n"
+    initial_prompt += "The message enclosed by the brackets was given to the models to predict the class.\n"
+    initial_prompt += "["
+
+    for index, row in results.iterrows():
+        prompt = initial_prompt
+        for message in row['text']:
+            prompt += f"{message['content']}\n"
+
+        prompt += "]\n"
+        prompt += "Now, the other models have predicted the following classes:\n"
+        
+        for model in model_types:
+            prompt += f"Model {model} predicted {row[model]}\n"
+        print(prompt)
+        break
+
+
+
+
+
+
 
     # Load the model
     #model = get_model(model_name, quantize=True)

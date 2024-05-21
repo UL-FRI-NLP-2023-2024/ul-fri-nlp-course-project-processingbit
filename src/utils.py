@@ -408,8 +408,10 @@ def load_data_predicts(path_dir, class_to_predict, model_name='mistral'):
         if file.endswith(".npy"):
             features = parse_filename(file)
             if class_to_predict.lower() == features[1].lower():
-                name = file[:-4]
-                predictions = np.load(path_dir + file)
+                name = features[0]
+                print(f"Loading {name} for {class_to_predict}")
+                predictions = np.load(path_dir + file, allow_pickle=True)
+                print(predictions)
                 data[name] = predictions
     
     return data
