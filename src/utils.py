@@ -237,6 +237,7 @@ def get_data_for_train_test(class_to_predict='Discussion',
                 data_file='./data/cleaned_data.csv',
                 codebook_file='./data/codebook.xlsx',
                 context_file='./context/context.csv',
+                remove_nan=False,
                 **data_args
                 ):
     """
@@ -320,8 +321,15 @@ def get_data_for_train_test(class_to_predict='Discussion',
         prompts.append(message)
 
     # COMBINE PROMPTS WITH FINAL CLASSES IN PANDAS
+    data['prompt'] = prompts
+    if remove_nan:
+        data = data.dropna(subset=[class_to_predict])
+
     labels = [str(label) for label in data[class_to_predict]]
-    indexes = data.index
+    indexes = data.index.to_list()
+    
+    #select the prompts that are in position indexes
+    prompts = [prompt for prompt in data['prompt']]
 
     dataset = pd.DataFrame({
         'index': indexes,
