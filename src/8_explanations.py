@@ -53,7 +53,7 @@ if __name__ == "__main__":
     data = load_data_predicts(path_dir, class_to_predict, model_name)
     
     # Message used to ask the llm for an explanation
-    explanation_message = "Based on the previous chat, can you explain to me why you have chosen this class in a few sentences?"
+    explanation_message = "Based on the previous chat, can you explain to me why you have chosen this class in a two sentences? Use at most one hundred words. Please reference parts of the input message when explaining your decision."
 
     # Retrieve one message from the test data for proof of concept
     test_data = data.iloc[0]
