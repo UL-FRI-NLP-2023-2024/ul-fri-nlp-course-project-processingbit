@@ -369,8 +369,10 @@ def find_first(sentence, items, prep = True):
     items = np.append(items, 'None')
     for i in items:
         if prep:
-            i = preprocess(i)
-        index = sentence.find(i)
+            tmp = preprocess(i)
+        else:
+            tmp = i
+        index = sentence.find(tmp)
         if index != -1 and index < first:
             first = index
             item = i

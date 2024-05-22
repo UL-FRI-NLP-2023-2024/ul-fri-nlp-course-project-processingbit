@@ -65,16 +65,18 @@ if __name__ == "__main__":
 
     initial_prompt = "You are an human ensemble. You have to predict the class of the following text, based on the results of other models.\n"
     initial_prompt += "You will receive some information about the classes, the text and the other models predictions.\n"
-    initial_prompt += "The message enclosed by the brackets was given to the models to predict the class.\n"
-    initial_prompt += "["
 
     prompts = []
     for index, row in results.iterrows():
-        prompt = initial_prompt
-        for message in row['text']:
-            prompt += f"[{message['content']}]\n"
+        row['text'][0] = initial_prompt +
 
-        prompt += "]\n"
+        
+        #for message in row['text']:
+        #    prompt += f"[{message['content']}]\n"
+
+
+
+        prompt += "'''\n"
         prompt += "The last input sentence is the sentence that the models are trying to classify.\n"
         prompt += "Now, the other models have predicted the following classes:\n"
 
@@ -99,10 +101,10 @@ if __name__ == "__main__":
             model=model,
             tokenizer=tokenizer,
             return_full_text=False,
-            temperature=0.5,
+            #temperature=0.5,
             max_new_tokens=100,
-            repetition_penalty=1.2,
-            do_sample=True,
+            repetition_penalty=1.5,
+            #do_sample=True,
         )
 
     generated_texts = pipe(prompts)
