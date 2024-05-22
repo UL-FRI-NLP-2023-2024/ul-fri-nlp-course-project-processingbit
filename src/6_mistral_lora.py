@@ -14,36 +14,36 @@ from utils import *
 if __name__ == '__main__':
     ################## SETTINGS ##################
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f'Device: {device}')
     
-    model_name = "mistral-7B"
+    model_name = "llama-3-8"
     llm_model = get_model_path(model_name)
-    print(f'Model: {llm_model}')
     quantize = True
-
+    
     # Settings for the data
     class_to_predict = 'Discussion'
     use_history = True
     use_past_labels = True
     use_context = True
+    process_output = False
 
     # Model and tokenizer
     model = get_model(llm_model, quantize)
     tokenizer = get_tokenizer(llm_model)
 
-    train = False
-    load_adapter = True
-    #adapter_file = f"./adapters/{model_name}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}"
-    adapter_file = "./checkpoints_mistral-7B_best/checkpoint-180"
+    train = True
+    batch_size = 2
+    lr = 2e-4
 
+    load_adapter = False
+    adapter_file = f"./adapters/{model_name}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}/"
+    #adapter_file = "./checkpoints_mistral-7B_best/checkpoint-180"
+
+    save_output = False
     ########################## SETTING TOKENIZER ######################
 
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
-    #tokenizer.add_bos_token = False
-    #tokenizer.add_eos_token = False
-    #print("Add bos, eos tokens", tokenizer.add_eos_token, tokenizer.add_bos_token)
-    print('eos token:', tokenizer.eos_token)
+
     test_message = [
         {"role": "user", "content": "SOMETHING"},
         {"role": "assistant", "content": "SOMETHING"}
@@ -52,8 +52,11 @@ if __name__ == '__main__':
     assistant_token = tokenizer.apply_chat_template(test_message, tokenize=False, add_generation_prompt=True)
     pre_assistant_token = assistant_token.split('SOMETHING')[1].strip()
     post_assistant_token = assistant_token.split('SOMETHING')[2].strip()
-    print('Pre-assistant token:', pre_assistant_token)
-    print('Post-assistant token:', post_assistant_token)
+
+    if model_name.startswith('llama'):
+        pre_assistant_token = '<|start_header_id|>assistant<|end_header_id|>'
+    elif model_name.startswith('mistral'):
+        pre_assistant_token = '[/INST]'
 
     ########################## PREPROCESSING ##########################
     def preprocess_element(element):
@@ -67,24 +70,20 @@ if __name__ == '__main__':
 
     dataset = load_data(model_name, class_to_predict, use_history, use_past_labels, use_context)
     classes = np.unique(dataset['train']['labels'])
-    print('Train classes:', classes)
-    print('Validation classes:', np.unique(dataset['validation']['labels']))
-    print('Test classes:', np.unique(dataset['test']['labels']))
+    
+    dataset['train'] = dataset['train'].map(preprocess_element)
+    dataset['validation'] = dataset['validation'].map(preprocess_element)
+    dataset['test'] = dataset['test'].map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False)})
 
-    if train:
-        for split in dataset.keys():
-            dataset[split] = dataset[split].map(preprocess_element)
-    else:
-        dataset['test'] = dataset['test'].map(lambda x: {"text": tokenizer.apply_chat_template(x["text"], tokenize=False, add_generation_prompt=True)})
-
-    print('Example of text template:', dataset['train']['text'][0])
+    print("Prompt Example:", dataset['train']['text'][0])
     
     ########################## TRAINING ##########################
-    
+    print(f'Model: {llm_model}')
+    print(f'Class: {class_to_predict}')
+
     if train:
         model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
-        #model.config.pad_token_id = model.config.eos_token_id
-        #model.config.pretraining_tp = 1
+
         if quantize:
             model = prepare_model_for_kbit_training(model)
 
@@ -94,22 +93,21 @@ if __name__ == '__main__':
             r=16,
             bias="none",
             task_type="CAUSAL_LM",
-            #target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj"]
         )
 
         model = get_peft_model(model, peft_config)
         print_trainable_parameters(model)   
         
         training_arguments = TrainingArguments(
-            output_dir= f"./checkpoints_{model_name}",
-            per_device_train_batch_size=2,
-            per_device_eval_batch_size=2,
+            output_dir= f"./checkpoints_{model_name}_{class_to_predict.lower()}",
+            per_device_train_batch_size=batch_size,
+            per_device_eval_batch_size=batch_size,
             gradient_accumulation_steps=8,
             optim="paged_adamw_32bit",
             num_train_epochs=100,
             logging_steps=20,
             save_steps=20,
-            learning_rate=2e-4,
+            learning_rate=lr,
             warmup_steps=100,
             load_best_model_at_end=True,
             metric_for_best_model="f1",
@@ -137,8 +135,8 @@ if __name__ == '__main__':
             decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
             decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
             
-            decoded_preds = [find_first(pred, classes) for pred in decoded_preds]
-            decoded_labels = [find_first(label, classes) for label in decoded_labels]
+            decoded_preds = [find_first(pred, classes, process_output) for pred in decoded_preds]
+            decoded_labels = [find_first(label, classes, process_output) for label in decoded_labels]
 
             return {
                 'accuracy': accuracy_score(decoded_labels, decoded_preds ),
@@ -159,7 +157,7 @@ if __name__ == '__main__':
             data_collator=collator,
             args=training_arguments,
             compute_metrics=compute_metrics,
-            callbacks = [EarlyStoppingCallback(early_stopping_patience=3)],
+            callbacks = [EarlyStoppingCallback(early_stopping_patience=4)],
             dataset_text_field="text",
             max_seq_length=2048,
         )
@@ -170,9 +168,6 @@ if __name__ == '__main__':
         
         # Training
         trainer.train()
-
-        test_results = trainer.predict(dataset['test'])
-        print(test_results)
 
         # Save the model
         model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model  # Take care of distributed/parallel training
@@ -186,9 +181,6 @@ if __name__ == '__main__':
 
     # Testing
     model.config.use_cache = True
-    #tokenizer.add_bos_token = True
-    #tokenizer.add_eos_token = False
-    #tokenizer.padding_side = 'left'
     model.eval()
 
     pipe = pipeline(
@@ -218,7 +210,7 @@ if __name__ == '__main__':
     print(classification_report(dataset['test']['labels'], post_processed_answers))
 
     # Save the generated text
-    filepath = get_results_path(model_name, class_to_predict, use_history, use_past_labels, use_context)
-    np.save(filepath, post_processed_answers)
+    if save_output:
+        filepath = get_results_path(model_name, class_to_predict, use_history, use_past_labels, use_context)
+        np.save(filepath, post_processed_answers)
     
-
