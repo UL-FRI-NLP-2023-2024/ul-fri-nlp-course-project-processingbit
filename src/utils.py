@@ -163,6 +163,9 @@ def get_preprocessed_path(model_name, class_to_predict, use_history, use_past_la
     return f'./preprocessed/{model_name}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}'
 
 def get_extension(class_to_predict, use_history, use_past_labels, use_context):
+    if not use_history and use_past_labels:
+        raise ValueError('Cannot use the last labels without the history.')
+
     extension = f'_{class_to_predict.lower()}'
     if use_history or use_past_labels or use_context:
         extension += '_w'
