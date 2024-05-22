@@ -57,37 +57,72 @@ if __name__ == "__main__":
     # Merge the data
     #left_data = data.drop(columns=['text'])
     results = pd.merge(data, prep_data[['message']], left_on='index', right_index=True)
+    
+    classes = results['labels'].unique()
+    
+    model_types = results.columns.to_list()
+    model_types = [model for model in model_types if model not in ['index', 'message', 'labels', 'text']]
 
-    model_types = results.columns
-    model_types.drop(columns=['index', 'message', 'labels', 'text'])
-
-    initial_prompt = "You are an ensemble AI. You have to predict the class of the following text, based on the results of other models.\n"
+    initial_prompt = "You are an human ensemble. You have to predict the class of the following text, based on the results of other models.\n"
     initial_prompt += "You will receive some information about the classes, the text and the other models predictions.\n"
     initial_prompt += "The message enclosed by the brackets was given to the models to predict the class.\n"
     initial_prompt += "["
 
+    prompts = []
     for index, row in results.iterrows():
         prompt = initial_prompt
         for message in row['text']:
-            prompt += f"{message['content']}\n"
+            prompt += f"[{message['content']}]\n"
 
         prompt += "]\n"
+        prompt += "The last input sentence is the sentence that the models are trying to classify.\n"
         prompt += "Now, the other models have predicted the following classes:\n"
-        
+
         for model in model_types:
-            prompt += f"Model {model} predicted {row[model]}\n"
-        print(prompt)
-        break
+            prompt += f"Model {model} predicted {row[model]},\n"
 
-
-
-
-
-
+        prompt += "What class do you this is the correct one? Answer with only the class that you think it's right.\n"
+        
+        prompts.append(prompt)
 
     # Load the model
-    #model = get_model(model_name, quantize=True)
-    #tokenizer = get_tokenizer(model_name)
+    model = get_model(llm_model, quantize=True)
+    tokenizer = get_tokenizer(llm_model)
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
+
+    model.config.use_cache = True
+    model.eval()
+
+    pipe = pipeline(
+            task="text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            return_full_text=False,
+            temperature=0.5,
+            max_new_tokens=100,
+            repetition_penalty=1.2,
+            do_sample=True,
+        )
+
+    generated_texts = pipe(prompts)
+
+    answers = [answer[0]['generated_text'] for answer in generated_texts]
+
+    post_processed_answers = [find_first(answer, classes) for answer in answers]
+
+    for i, class_answer in enumerate(post_processed_answers):
+        print('Generated:', answers[i])
+        print('Post-processed:', class_answer)
+        print('Real Label:', results['labels'][i])
+        print()
+
+    # Classification report
+    print(classification_report(results['labels'], post_processed_answers))
+
+
+
+
 
     
 

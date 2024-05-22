@@ -360,14 +360,17 @@ def preprocess(text):
 
     return " ".join(tokens)
 
-def find_first(sentence, items):
-    sentence = preprocess(sentence)
+def find_first(sentence, items, prep = True):
+    if prep:
+        sentence = preprocess(sentence)
     first = len(sentence)
     item = None
     # add None
     items = np.append(items, 'None')
     for i in items:
-        index = sentence.find(preprocess(i))
+        if prep:
+            i = preprocess(i)
+        index = sentence.find(i)
         if index != -1 and index < first:
             first = index
             item = i
@@ -409,9 +412,7 @@ def load_data_predicts(path_dir, class_to_predict, model_name='mistral'):
             features = parse_filename(file)
             if class_to_predict.lower() == features[1].lower():
                 name = features[0]
-                print(f"Loading {name} for {class_to_predict}")
                 predictions = np.load(path_dir + file, allow_pickle=True)
-                print(predictions)
                 data[name] = predictions
     
     return data

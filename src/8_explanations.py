@@ -53,7 +53,7 @@ if __name__ == "__main__":
     data = load_data_predicts(path_dir, class_to_predict, model_name)
     
     # Message used to ask the llm for an explanation
-    explanation_message = "Based on the previous chat, can you explain to me why you have chosen the last class?"
+    explanation_message = "Based on the previous chat, can you explain to me why you have chosen this class in a few sentences?"
 
     # Retrieve one message from the test data for proof of concept
     test_data = data.iloc[0]
@@ -90,7 +90,7 @@ if __name__ == "__main__":
             tokenizer=tokenizer,
             return_full_text=False,
             temperature=0.5,
-            max_new_tokens=150,
+            max_new_tokens=500,
             repetition_penalty=1.5,
             do_sample=True,
         )
