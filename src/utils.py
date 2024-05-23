@@ -154,24 +154,25 @@ def get_classes(codebook):
 #############                PREPROCESSING             ##############
 #####################################################################
 
-def get_preprocessed_path(model_name, class_to_predict, use_history, use_past_labels, use_context):
+def get_preprocessed_path(model_name, class_to_predict, use_history, use_past_labels, use_context, extra=None):
     if model_name.startswith("mistral"):
         model_name = "mistral"
     elif model_name.startswith("llama"):
         model_name = "llama"
         
-    return f'./preprocessed/{model_name}{get_extension(class_to_predict, use_history, use_past_labels, use_context)}'
+    return f'./preprocessed/{model_name}{get_extension(class_to_predict, use_history, use_past_labels, use_context, extra)}'
 
-def get_extension(class_to_predict, use_history, use_past_labels, use_context):
+def get_extension(class_to_predict, use_history, use_past_labels, use_context, extra=None):
     if not use_history and use_past_labels:
         raise ValueError('Cannot use the last labels without the history.')
 
     extension = f'_{class_to_predict.lower()}'
-    if use_history or use_past_labels or use_context:
+    if use_history or use_past_labels or use_context or extra is not None:
         extension += '_w'
         extension += '_history' if use_history else ''
         extension += '_past-labels' if use_past_labels and use_history else ''    
         extension += '_context' if use_context else ''
+        extension += f'_{extra}' if extra is not None else ''
     return extension
 
 def preprocess_data(
@@ -225,12 +226,12 @@ def split_data(data, test_size=0.2, random_state=42):
     data['validation'] = train_val_dataset['test']
     return data
 
-def load_data(model_type, class_to_predict, use_history, use_past_labels, use_context):
-    data = load_from_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context))
+def load_data(model_type, class_to_predict, use_history, use_past_labels, use_context, extra = None):
+    data = load_from_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context, extra))
     return data
 
-def save_data(data, model_type, class_to_predict, use_history, use_past_labels, use_context):
-    data.save_to_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context))
+def save_data(data, model_type, class_to_predict, use_history, use_past_labels, use_context, extra=None):
+    data.save_to_disk(get_preprocessed_path(model_type, class_to_predict, use_history, use_past_labels, use_context, extra))
 
 def get_data_for_train_test(class_to_predict='Discussion',
                 use_history=True,
@@ -307,6 +308,11 @@ def get_data_for_train_test(class_to_predict='Discussion',
 
         # No system for mistral
         if model_name.startswith("mistral"):
+
+            if not use_past_labels and model_name.startswith("mistral"):
+                total_history = "\n".join(row[data_args['history_field']])
+                system_message += f"\n{total_history}"
+
             message = [{ "role": "user", "content": system_message}]
             message.append({ "role": "assistant", "content": "Ok, let's start!"})
 
@@ -316,9 +322,10 @@ def get_data_for_train_test(class_to_predict='Discussion',
         
         if use_history:
             for i, chat in enumerate(row[data_args['history_field']]):
-                message.append({ "role": "user", "content": chat})
-                if use_past_labels:
-                    message.append({ "role": "assistant", "content": f'Class: {row[data_args["history_label"]][i]}'})
+                if use_past_labels or model_name.startswith("llama"):
+                    message.append({ "role": "user", "content": chat})
+                    if use_past_labels:
+                        message.append({ "role": "assistant", "content": f'Class: {row[data_args["history_label"]][i]}'})
         
         message.append({ "role": "user", "content": row[data_args['text_field']]})
         prompts.append(message)
