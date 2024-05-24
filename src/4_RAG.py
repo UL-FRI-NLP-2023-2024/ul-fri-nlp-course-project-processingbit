@@ -1,10 +1,25 @@
 import pandas as pd
 from utils import *
 
-####### FILE CONFIGURATION #######
+"""
+This script performs data processing and retrieval using the RAG (Retrieval-Augmented Generation) model.
 
-    
-##### MAIN FUNCTION ######
+The script reads a dataset file containing cleaned data and preprocesses it for input to the RAG model. 
+It then uses a retriever to retrieve relevant documents based on the input prompts. 
+The retrieved documents are saved to a CSV file.
+
+Configuration Options:
+    - use_history: Whether to include chat history in the input prompts.
+    - quantize: Whether to quantize the retrieved documents.
+    - window_size: The size of the window for considering past labels.
+    - dataset_file: The path to the dataset file containing cleaned data.
+    - retriever: The retriever object used for document retrieval.
+    - text_field: The name of the field in the dataset containing the input text.
+    - history_field: The name of the field in the dataset containing the chat history.
+
+Output:
+    - The retrieved documents are saved to a CSV file named 'context.csv' in the 'preprocessed' directory.
+"""
 
 if __name__ == '__main__':
 
@@ -19,7 +34,7 @@ if __name__ == '__main__':
                             use_llm=True,
                             quantize = quantize,
                             )
-            
+    
     # Data processing
     text_field = 'message'
     history_field = 'history'

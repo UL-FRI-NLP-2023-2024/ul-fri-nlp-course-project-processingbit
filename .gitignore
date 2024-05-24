@@ -7,3 +7,10 @@ src/llm_versions/
 *saved_clf_adapters*
 *clf-new_format*
 *cache*
+
+src/pred_results/
+src/models/
+src/result_logs/
+src/llm_versions/
+src/adapters/
+src/preprocessed/

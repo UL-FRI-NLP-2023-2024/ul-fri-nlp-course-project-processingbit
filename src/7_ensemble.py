@@ -42,7 +42,7 @@ from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from utils import *
 
 if __name__ == "__main__":
-    class_to_predict = "Discussion"
+    class_to_predict = "Uptake"
     path_dir = "./pred_results/"
 
     model_name = "llama-3-8"
@@ -63,29 +63,32 @@ if __name__ == "__main__":
     model_types = results.columns.to_list()
     model_types = [model for model in model_types if model not in ['index', 'message', 'labels', 'text']]
 
-    initial_prompt = "You are an human ensemble. You have to predict the class of the following text, based on the results of other models.\n"
-    initial_prompt += "You will receive some information about the classes, the text and the other models predictions.\n"
+    initial_prompt = "You are an human ensemble. You have to decide the right categorization across some experts on the field.\n"
+    initial_prompt += "You will receive some information about the classes, the text and the other expert predictions.\n"
 
     prompts = []
     for index, row in results.iterrows():
-        row['text'][0] = initial_prompt +
+        # change the fist
+        messages = row['text'].copy()
 
-        
-        #for message in row['text']:
-        #    prompt += f"[{message['content']}]\n"
+        messages[0]['content'] = initial_prompt + "\n".join(messages[0]['content'].split("\n")[1:])
 
+        messages.append({
+            'role': 'assistant',
+            'content': 'Can you give me some hits from the experts?'
+        })
 
-
-        prompt += "'''\n"
-        prompt += "The last input sentence is the sentence that the models are trying to classify.\n"
-        prompt += "Now, the other models have predicted the following classes:\n"
-
+        prompt = "Some experts came up with the following categorizations about the last sentence.\n"
         for model in model_types:
-            prompt += f"Model {model} predicted {row[model]},\n"
-
-        prompt += "What class do you this is the correct one? Answer with only the class that you think it's right.\n"
+            prompt += f"Expert {model} categorized the sentence as class: {row[model]}.\n"
+        prompt += "What class do you this is the correct one? Answer this question with only the class that you think it's right.\n"
         
-        prompts.append(prompt)
+        messages.append({
+            'role': 'user',
+            'content': prompt
+        })
+        
+        prompts.append(messages)
 
     # Load the model
     model = get_model(llm_model, quantize=True)
